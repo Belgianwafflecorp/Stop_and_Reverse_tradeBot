@@ -10,7 +10,8 @@ sys.path.append(PROJECT_ROOT)
 
 from src.exchanges.bybit import BybitClient
 from src.calc_engine import TradeCalculator
-from src.market_scanner import MarketScanner  
+from src.market_scanner import MarketScanner
+from src.position_tracker import PositionTracker  
 
 def load_json(path):
     with open(path, 'r') as f:
@@ -55,6 +56,9 @@ class TradingBot:
         # Dependency Injection: Pass the 'bybit' client to the scanner
         self.scanner = MarketScanner(self.bybit, self.config)
         
+        # Position tracker for state management
+        self.tracker = PositionTracker(self.bybit)
+        
         self.active_coin = None
 
     def start_cycle(self):
@@ -70,8 +74,12 @@ class TradingBot:
 
         print(f"Starting cycle on {self.active_coin}")
         
+        # Check current position state before trading
+        position_state = self.tracker.analyze_position_state(self.active_coin, lookback_hours=1)
+        print(self.tracker.get_position_summary(self.active_coin, lookback_hours=1))
+        
         # Here you would trigger the trading logic (Order placement, etc.)
-        # self.execute_trade_logic(self.active_coin)
+        # self.execute_trade_logic(self.active_coin, position_state)
 
     def run(self):
         while True:

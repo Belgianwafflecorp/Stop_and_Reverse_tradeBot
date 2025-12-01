@@ -1,4 +1,5 @@
 import ccxt
+import asyncio
 import time
 
 class BybitClient:
@@ -59,3 +60,62 @@ class BybitClient:
         :param limit: number of candles
         """
         return self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+
+    def fetch_all_fills(self, symbol, start_time_ms):
+        """
+        Fetches all trade fills for a symbol from start_time_ms to now.
+        Implements backward-fetching logic to handle pagination.
+        
+        :param symbol: Trading pair symbol (e.g., 'BTC/USDT:USDT')
+        :param start_time_ms: Start time in milliseconds
+        :return: List of all fills sorted by timestamp
+        """
+        all_trades = []
+        end_time = int(time.time() * 1000)  # Start fetching from NOW
+        limit = 200  # Bybit max limit per request
+        
+        print(f"Fetching trade history for {symbol}...")
+
+        while True:
+            try:
+                # Fetch a page of trades
+                params = {'endTime': end_time}
+                trades = self.exchange.fetch_my_trades(symbol, limit=limit, params=params)
+                
+                if not trades:
+                    break
+
+                # Sort to ensure we handle time correctly
+                trades.sort(key=lambda x: x['timestamp'])
+                
+                # Add to our master list
+                all_trades.extend(trades)
+                
+                first_trade_time = trades[0]['timestamp']
+
+                # BREAK CONDITIONS
+                # 1. We went back further than our start_time
+                if first_trade_time < start_time_ms:
+                    break
+                
+                # 2. We received fewer trades than the limit, meaning we reached the end of history
+                if len(trades) < limit:
+                    break
+                
+                # UPDATE POINTER: Set end_time to just before the oldest trade we found
+                # This prevents duplicates and moves the window back
+                end_time = first_trade_time - 1
+                
+                # Rate limit safety
+                time.sleep(0.1)
+
+            except Exception as e:
+                print(f"Error fetching trade history: {e}")
+                break
+        
+        # Filter exact start time and dedup
+        unique_trades = {t['id']: t for t in all_trades if t['timestamp'] >= start_time_ms}
+        final_trades = sorted(unique_trades.values(), key=lambda x: x['timestamp'])
+        
+        print(f"Retrieved {len(final_trades)} fills for {symbol}")
+        return final_trades
