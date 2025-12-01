@@ -1,0 +1,7 @@
+{
+    "bybit" : {
+        "exchange": "bybit",
+        "key": "key",
+        "secret": "secret"
+    }
+}

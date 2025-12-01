@@ -1,0 +1,18 @@
+{
+  "strategy": {
+    "base_size_usdt": 10.0,
+    "max_flips": 5,
+    "leverage": 10,
+    "martingale_multiplier": 2.1,  
+    "flip_threshold_pct": 1.0,     
+    
+    "take_profit": {
+      "activation_pct": 1.0,       
+      "callback_pct": 0.5          
+    },
+    
+    "fees": {
+      "taker_fee_rate": 0.0006     
+    }
+  }
+}
