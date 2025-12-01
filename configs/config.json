@@ -1,4 +1,15 @@
 {
+  "api": {
+    "testnet": false
+  },
+  
+  "scanner_settings": {
+    "min_volume_usdt": 1000000,
+    "volatility_lookback_candles": 10,
+    "interval": "5m",
+    "top_k_candidates": 5
+  },
+  
   "strategy": {
     "base_size_usdt": 10.0,
     "max_flips": 5,

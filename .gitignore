@@ -1,2 +1,6 @@
 # config files
 api-keys.json
+
+# venv
+venv/
+__pycache__/
