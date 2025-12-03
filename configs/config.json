@@ -20,10 +20,6 @@
     "take_profit": {
       "activation_pct": 1.0,       
       "callback_pct": 0.5          
-    },
-    
-    "fees": {
-      "taker_fee_rate": 0.0006     
     }
   }
 }

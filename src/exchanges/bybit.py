@@ -60,6 +60,43 @@ class BybitClient:
         :param limit: number of candles
         """
         return self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
+    
+    def fetch_trading_fees(self, symbol=None):
+        """
+        Fetches trading fees from the exchange.
+        
+        :param symbol: Optional specific symbol to get fees for
+        :return: Dictionary with maker and taker fee rates
+        """
+        try:
+            if symbol:
+                # Fetch fees for specific symbol
+                fees = self.exchange.fetch_trading_fee(symbol)
+                return {
+                    'maker': fees.get('maker', 0.0001),
+                    'taker': fees.get('taker', 0.0006)
+                }
+            else:
+                # Fetch general trading fees
+                fees = self.exchange.fetch_trading_fees()
+                # Bybit usually returns a dict with symbol keys or a 'trading' key
+                if 'trading' in fees:
+                    return {
+                        'maker': fees['trading'].get('maker', 0.0001),
+                        'taker': fees['trading'].get('taker', 0.0006)
+                    }
+                # Return default structure
+                return {
+                    'maker': 0.0001,  # 0.01%
+                    'taker': 0.0006   # 0.06%
+                }
+        except Exception as e:
+            print(f"Error fetching trading fees: {e}")
+            print("Using default fees: maker=0.01%, taker=0.06%")
+            return {
+                'maker': 0.0001,
+                'taker': 0.0006
+            }
 
     def fetch_all_fills(self, symbol, start_time_ms):
         """

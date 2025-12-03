@@ -52,7 +52,7 @@ class TradingBot:
             self.bybit = BybitClient(testnet=self.config['api'].get('testnet', False))
 
         # 3. Initialize Components
-        self.calculator = TradeCalculator(self.config)
+        self.calculator = TradeCalculator(self.config, self.bybit)
         
         # Dependency Injection: Pass the 'bybit' client to the scanner
         self.scanner = MarketScanner(self.bybit, self.config)

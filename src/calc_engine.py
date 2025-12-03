@@ -1,9 +1,19 @@
 class TradeCalculator:
-    def __init__(self, config):
+    def __init__(self, config, bybit_client=None):
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.multiplier = config['strategy']['martingale_multiplier']
-        self.fee_rate = config['strategy']['fees']['taker_fee_rate']
         self.max_flips = config['strategy']['max_flips']
+        
+        # Fetch live fees from exchange if client is provided
+        self.client = bybit_client
+        if bybit_client:
+            fees = bybit_client.fetch_trading_fees()
+            self.fee_rate = fees.get('taker', 0.0006)
+            print(f"Loaded trading fees from exchange: taker={self.fee_rate*100:.3f}%")
+        else:
+            # Fallback to config if no client provided
+            self.fee_rate = config['strategy']['fees'].get('taker_fee_rate', 0.0006)
+            print(f"Using config fee rate: {self.fee_rate*100:.3f}%")
 
     def calculate_next_position(self, current_flip_count, previous_size, realized_loss):
         """
