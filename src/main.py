@@ -56,8 +56,8 @@ class TradingBot:
         # Dependency Injection: Pass the 'bybit' client to the scanner
         self.scanner = MarketScanner(self.bybit, self.config)
         
-        # Position tracker for state management
-        self.tracker = PositionTracker(self.bybit)
+        # Position tracker for state management (needs config for cycle detection)
+        self.tracker = PositionTracker(self.bybit, self.config)
         
         self.active_coin = None
 
