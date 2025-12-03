@@ -21,11 +21,15 @@ class MarketScanner:
         """
         print("Scanning market for volatility...")
 
-        # 1. Fetch all tickers
+        # 1. Fetch markets info and tickers
         try:
+            markets = self.client.fetch_markets()
             tickers = self.client.fetch_tickers()
+            
+            # Build a lookup for market info
+            market_info = {m['symbol']: m for m in markets}
         except Exception as e:
-            print(f"Error fetching tickers: {e}")
+            print(f"Error fetching market data: {e}")
             return None
 
         candidates = []
@@ -36,12 +40,23 @@ class MarketScanner:
             if not symbol.endswith(':USDT'):
                 continue
             
-            # Filter 2: Volume check (quoteVolume is volume in USDT)
+            # Filter 2: Check if innovation zone (if market info available)
+            market = market_info.get(symbol, {})
+            info = market.get('info', {})
+            
+            # Bybit marks innovation zone in the 'info' field
+            # Check for innovation markers: innovatorSymbol, status, category
+            if info.get('innovatorSymbol') == '1' or \
+               info.get('status') == 'PreLaunch' or \
+               'innovation' in str(info.get('category', '')).lower():
+                continue  # Skip innovation zone coins
+            
+            # Filter 3: Volume check (quoteVolume is volume in USDT)
             vol_usdt = data.get('quoteVolume')
             if not vol_usdt or vol_usdt < self.min_volume:
                 continue
 
-            # Filter 3: Calculate 24h High/Low Spread
+            # Filter 4: Calculate 24h High/Low Spread
             high = data['high']
             low = data['low']
             if not low or low == 0: continue

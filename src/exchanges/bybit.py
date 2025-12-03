@@ -52,6 +52,13 @@ class BybitClient:
     def fetch_tickers(self):
         """Fetches 24h ticker data for all symbols."""
         return self.exchange.fetch_tickers()
+    
+    def fetch_markets(self):
+        """
+        Fetches market information including innovation zone markers.
+        Returns detailed market info for all trading pairs.
+        """
+        return self.exchange.fetch_markets()
 
     def fetch_candles(self, symbol, timeframe, limit):
         """
