@@ -9,10 +9,10 @@ class PositionTracker:
     def __init__(self, bybit_client, config):
         """
         :param bybit_client: Instance of BybitClient
-        :param config: Bot configuration dictionary (needed for base_size and multiplier)
+        :param config: Bot configuration dictionary (needed for initial_entry_pct and multiplier)
         """
         self.client = bybit_client
-        self.base_size = config['strategy']['base_size_usdt']
+        self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.multiplier = config['strategy']['martingale_multiplier']
     
     def analyze_position_state(self, symbol, lookback_hours=24):

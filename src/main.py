@@ -11,7 +11,8 @@ sys.path.append(PROJECT_ROOT)
 from src.exchanges.bybit import BybitClient
 from src.calc_engine import TradeCalculator
 from src.market_scanner import MarketScanner
-from src.position_tracker import PositionTracker  
+from src.position_tracker import PositionTracker
+from src.account_manager import AccountManager  
 
 def load_json(path):
     with open(path, 'r') as f:
@@ -58,6 +59,9 @@ class TradingBot:
         
         # Position tracker for state management (needs config for cycle detection)
         self.tracker = PositionTracker(self.bybit, self.config)
+        
+        # Account manager for balance and position sizing
+        self.account = AccountManager(self.bybit, self.config)
         
         self.active_coin = None
 

@@ -1,6 +1,6 @@
 {
   "api": {
-    "testnet": false
+    "testnet": true
   },
   
   "scanner_settings": {
@@ -11,7 +11,7 @@
   },
   
   "strategy": {
-    "base_size_usdt": 10.0,
+    "initial_entry_pct": 1.0,
     "max_flips": 5,
     "leverage": 10,
     "martingale_multiplier": 2.1,  

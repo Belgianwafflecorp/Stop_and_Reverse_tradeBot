@@ -1,6 +1,6 @@
 class TradeCalculator:
     def __init__(self, config):
-        self.base_size = config['strategy']['base_size_usdt']
+        self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.multiplier = config['strategy']['martingale_multiplier']
         self.fee_rate = config['strategy']['fees']['taker_fee_rate']
         self.max_flips = config['strategy']['max_flips']
