@@ -12,15 +12,27 @@ class MarketScanner:
         self.lookback = config['scanner_settings']['volatility_lookback_candles']
         self.interval = config['scanner_settings']['interval']
         self.top_k = config['scanner_settings']['top_k_candidates']
+        self.timeframe_1_minutes = config['scanner_settings'].get('timeframe_1_minutes', 1440)  # 24h default
+        self.timeframe_1_threshold = config['scanner_settings'].get('timeframe_1_change_pct', 2.0)
+        self.timeframe_2_minutes = config['scanner_settings'].get('timeframe_2_minutes', 5)    # 5m default
+        self.timeframe_2_threshold = config['scanner_settings'].get('timeframe_2_change_pct', 0.2)
 
     def get_best_volatile_coin(self):
         """
-        Main function to find the best coin.
-        1. Filters by 24h Spread (High/Low).
-        2. Filters top candidates by recent candle volatility.
+        Main function to find the best coin using dual timeframe filtering.
+        1. Filter by timeframe_1 movement (e.g., 1440min/24h > 2%)
+        2. Confirm with timeframe_2 movement (e.g., 5min > 0.2%)
+        3. Score based on recent volatility + current movement
         """
-        print("Scanning market for volatility...")
+        tf1_display = self._minutes_to_display(self.timeframe_1_minutes)
+        tf2_display = self._minutes_to_display(self.timeframe_2_minutes)
+        print(f"Scanning market with dual timeframe filter ({tf1_display} > {self.timeframe_1_threshold}% + {tf2_display} > {self.timeframe_2_threshold}%)...")
+        return self.scan_dual_timeframe()
 
+    def scan_dual_timeframe(self):
+        """
+        Dual timeframe filtering: Primary timeframe filter + secondary timeframe confirmation
+        """
         # 1. Fetch markets info and tickers
         try:
             markets = self.client.fetch_markets()
@@ -79,8 +91,8 @@ class MarketScanner:
                 if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT', 'SOL/USDT:USDT', 'BTC/USDT:USDT']:
                     print(f"  USING CCXT: {percentage:.2f}%")
             
-            # Filter 4: Skip coins that don't move enough (less than 2%)
-            if percentage < 2.0:
+            # Filter 4: Skip coins that don't move enough (configurable threshold)
+            if percentage < self.timeframe_1_threshold:
                 continue
             
             # Get volume for informational purposes only
@@ -100,27 +112,47 @@ class MarketScanner:
             
         df = df.sort_values(by='change_pct', ascending=False).head(self.top_k)
         
-        print(f"Top {len(df)} most volatile coins (>2% movement):")
+        tf1_display = self._minutes_to_display(self.timeframe_1_minutes)
+        tf2_display = self._minutes_to_display(self.timeframe_2_minutes)
+        
+        print(f"Top {len(df)} most volatile coins (>{self.timeframe_1_threshold}% {tf1_display} movement):")
         for idx, row in df.iterrows():
             print(f"  {row['symbol']}: {row['change_pct']:.2f}% change, ${row['volume']/1e6:.1f}M volume")
         
-        print(f"\nAnalyzing recent candles for confirmation...")
+        print(f"\nAnalyzing {tf2_display} movement for confirmation...")
 
-        # 4. Deep Dive: Check recent candles for "Fresh" volatility
+        # 4. Deep Dive: Check recent candles + timeframe_2 movement filter
         best_coin = None
-        highest_recent_vol = -1
+        highest_score = -1
 
         for symbol in df['symbol'].tolist():
             recent_vol = self.calculate_recent_volatility(symbol)
+            timeframe_2_move = self.get_timeframe_movement(symbol, self.timeframe_2_minutes)
             
-            if recent_vol > highest_recent_vol:
-                highest_recent_vol = recent_vol
+            print(f"  {symbol}: Recent vol: {recent_vol:.2f}%, {tf2_display}: {timeframe_2_move:.2f}%")
+            
+            # Apply timeframe_2 movement filter
+            if timeframe_2_move < self.timeframe_2_threshold:
+                print(f"    ❌ Skipped - insufficient {tf2_display} movement ({timeframe_2_move:.2f}% < {self.timeframe_2_threshold}%)")
+                continue
+            
+            # Combine both metrics (recent volatility + timeframe_2 movement)
+            # Weight: 70% recent volatility + 30% timeframe_2 movement
+            combined_score = (recent_vol * 0.7) + (timeframe_2_move * 0.3)
+            
+            if combined_score > highest_score:
+                highest_score = combined_score
                 best_coin = symbol
+                print(f"    ✅ New best candidate (Score: {combined_score:.2f})")
             
             # Small sleep to respect API rate limits during the loop
             time.sleep(0.1)
 
-        print(f"Winner found: {best_coin} (Recent Vol: {highest_recent_vol:.2f}%)")
+        if best_coin:
+            print(f"\n🎯 Winner found: {best_coin} (Score: {highest_score:.2f})")
+        else:
+            print(f"\n❌ No coins found with sufficient {tf2_display} movement (>{self.timeframe_2_threshold}%)")
+        
         return best_coin
 
     def calculate_recent_volatility(self, symbol):
@@ -149,3 +181,65 @@ class MarketScanner:
         except Exception as e:
             print(f"Error checking candles for {symbol}: {e}")
             return 0
+    
+    def get_timeframe_movement(self, symbol, minutes):
+        """
+        Gets the percentage change for a specific timeframe in minutes.
+        Converts minutes to exchange format and returns the percentage change.
+        """
+        try:
+            timeframe = self._minutes_to_timeframe(minutes)
+            # Fetch just the last 2 candles (current + previous)
+            candles = self.client.fetch_candles(symbol, timeframe, 2)
+            if len(candles) < 2:
+                return 0
+            
+            # Get the most recent completed candle
+            latest_candle = candles[-1]
+            open_price = latest_candle[1]  # [time, open, high, low, close, vol]
+            close_price = latest_candle[4]
+            
+            if open_price > 0:
+                change_pct = abs(((close_price - open_price) / open_price) * 100)
+                return change_pct
+            
+            return 0
+            
+        except Exception as e:
+            print(f"Error checking {self._minutes_to_display(minutes)} movement for {symbol}: {e}")
+            return 0
+    
+    def _minutes_to_timeframe(self, minutes):
+        """
+        Convert minutes to exchange timeframe format.
+        Examples: 1 -> '1m', 5 -> '5m', 60 -> '1h', 1440 -> '1d'
+        """
+        if minutes < 60:
+            return f"{minutes}m"
+        elif minutes < 1440:
+            hours = minutes // 60
+            return f"{hours}h"
+        else:
+            days = minutes // 1440
+            return f"{days}d"
+    
+    def _minutes_to_display(self, minutes):
+        """
+        Convert minutes to human-readable display format.
+        Examples: 1 -> '1min', 5 -> '5min', 60 -> '1h', 1440 -> '24h'
+        """
+        if minutes < 60:
+            return f"{minutes}min"
+        elif minutes < 1440:
+            hours = minutes // 60
+            if minutes % 60 == 0:
+                return f"{hours}h"
+            else:
+                return f"{hours}h{minutes % 60}min"
+        else:
+            days = minutes // 1440
+            remaining_hours = (minutes % 1440) // 60
+            if remaining_hours == 0:
+                return f"{days * 24}h"
+            else:
+                return f"{days * 24 + remaining_hours}h"
