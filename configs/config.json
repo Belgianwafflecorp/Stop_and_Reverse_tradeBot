@@ -1,6 +1,6 @@
 {
   "api": {
-    "testnet": true
+    "testnet": false
   },
   
   "scanner_settings": {

@@ -40,41 +40,46 @@ class MarketScanner:
             if not symbol.endswith(':USDT'):
                 continue
             
-            # Filter 2: Check if innovation zone (if market info available)
+            # Filter 2: Check if innovation zone (Bybit-specific, skip for other exchanges)
             market = market_info.get(symbol, {})
             info = market.get('info', {})
             
-            # Bybit marks innovation zone in the 'info' field
-            # Check for innovation markers: innovatorSymbol, status, category
-            if info.get('innovatorSymbol') == '1' or \
-               info.get('status') == 'PreLaunch' or \
-               'innovation' in str(info.get('category', '')).lower():
-                continue  # Skip innovation zone coins
+            # Only apply innovation filter if we have Bybit-specific data
+            if info:
+                if info.get('innovatorSymbol') == '1' or \
+                   info.get('status') == 'PreLaunch' or \
+                   'innovation' in str(info.get('category', '')).lower():
+                    continue  # Skip innovation zone coins
             
-            # Filter 3: Calculate 24h percentage change
-            # CCXT provides 'percentage' field, or we calculate from change/average
+            # Filter 3: Calculate 24h percentage change using CCXT standardized fields
             percentage = data.get('percentage')
             
+            # Debug specific problem coins
+            if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT', 'SOL/USDT:USDT', 'BTC/USDT:USDT']:
+                print(f"\nDEBUG {symbol}:")
+                print(f"  percentage field: {percentage}")
+                print(f"  open: {data.get('open')}")
+                print(f"  close: {data.get('close')}")
+                print(f"  last: {data.get('last')}")
+            
             if percentage is None:
-                # Fallback: calculate from 'change' and 'average' or from open/close
-                change = data.get('change')
-                average = data.get('average')
+                # Fallback: calculate from CCXT's standardized open/close fields
+                open_price = data.get('open')
+                close_price = data.get('close') or data.get('last')
                 
-                if change and average and average != 0:
-                    percentage = abs((change / average) * 100)
+                if open_price and close_price and open_price != 0:
+                    percentage = abs(((close_price - open_price) / open_price) * 100)
+                    if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT']:
+                        print(f"  CALCULATED: {percentage:.2f}%")
                 else:
-                    # Last fallback: use open/close
-                    open_price = data.get('open')
-                    close_price = data.get('close') or data.get('last')
-                    if open_price and close_price and open_price != 0:
-                        percentage = abs(((close_price - open_price) / open_price) * 100)
-                    else:
-                        continue  # Skip if we can't calculate percentage
+                    continue  # Skip if we can't calculate percentage
             else:
-                percentage = abs(percentage)  # Make it absolute (we don't care about direction)
+                # CCXT percentage is already in % format, just make it absolute
+                percentage = abs(percentage)
+                if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT', 'SOL/USDT:USDT', 'BTC/USDT:USDT']:
+                    print(f"  USING CCXT: {percentage:.2f}%")
             
             # Filter 4: Skip coins that don't move enough (less than 2%)
-            # If it moves less than your flip threshold, it's not worth trading
             if percentage < 2.0:
                 continue
             
