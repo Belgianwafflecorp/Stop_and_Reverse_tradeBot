@@ -51,34 +51,55 @@ class MarketScanner:
                'innovation' in str(info.get('category', '')).lower():
                 continue  # Skip innovation zone coins
             
-            # Filter 3: Volume check (quoteVolume is volume in USDT)
-            vol_usdt = data.get('quoteVolume')
-            if not vol_usdt or vol_usdt < self.min_volume:
-                continue
-
-            # Filter 4: Calculate 24h High/Low Spread
-            high = data['high']
-            low = data['low']
-            if not low or low == 0: continue
+            # Filter 3: Calculate 24h percentage change
+            # CCXT provides 'percentage' field, or we calculate from change/average
+            percentage = data.get('percentage')
             
-            spread_pct = ((high - low) / low) * 100
+            if percentage is None:
+                # Fallback: calculate from 'change' and 'average' or from open/close
+                change = data.get('change')
+                average = data.get('average')
+                
+                if change and average and average != 0:
+                    percentage = abs((change / average) * 100)
+                else:
+                    # Last fallback: use open/close
+                    open_price = data.get('open')
+                    close_price = data.get('close') or data.get('last')
+                    if open_price and close_price and open_price != 0:
+                        percentage = abs(((close_price - open_price) / open_price) * 100)
+                    else:
+                        continue  # Skip if we can't calculate percentage
+            else:
+                percentage = abs(percentage)  # Make it absolute (we don't care about direction)
+            
+            # Filter 4: Skip coins that don't move enough (less than 2%)
+            # If it moves less than your flip threshold, it's not worth trading
+            if percentage < 2.0:
+                continue
+            
+            # Get volume for informational purposes only
+            vol_usdt = data.get('quoteVolume', 0)
             
             candidates.append({
                 'symbol': symbol,
-                'spread_24h': spread_pct,
+                'change_pct': percentage,
                 'volume': vol_usdt
             })
 
-        # 3. Sort by 24h spread and take top X candidates
-        # We sort descending (highest spread first)
+        # 3. Sort by percentage change (highest volatility first)
         df = pd.DataFrame(candidates)
         if df.empty:
-            print("No coins found passing the volume filter.")
+            print("No coins found with >2% movement in 24h.")
             return None
             
-        df = df.sort_values(by='spread_24h', ascending=False).head(self.top_k)
+        df = df.sort_values(by='change_pct', ascending=False).head(self.top_k)
         
-        print(f"Analyzing recent candles for top {len(df)} candidates...")
+        print(f"Top {len(df)} most volatile coins (>2% movement):")
+        for idx, row in df.iterrows():
+            print(f"  {row['symbol']}: {row['change_pct']:.2f}% change, ${row['volume']/1e6:.1f}M volume")
+        
+        print(f"\nAnalyzing recent candles for confirmation...")
 
         # 4. Deep Dive: Check recent candles for "Fresh" volatility
         best_coin = None
