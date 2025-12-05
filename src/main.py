@@ -23,13 +23,33 @@ class TradingBot:
         # 1. Load Configs
         self.config_path = os.path.join(PROJECT_ROOT, 'configs', 'config.json')
         self.keys_path = os.path.join(PROJECT_ROOT, 'api-keys.json')
+        self.keys_example_path = os.path.join(PROJECT_ROOT, 'api-keys.json.example')
 
         try:
             self.config = load_json(self.config_path)
-            self.keys = load_json(self.keys_path)
         except FileNotFoundError as e:
-            print(f"\nCRITICAL ERROR: File not found!")
+            print(f"\nCRITICAL ERROR: Config file not found!")
             print(f"Looking for: {e.filename}")
+            sys.exit(1)
+        
+        # Handle API keys file with better error messaging
+        try:
+            self.keys = load_json(self.keys_path)
+        except FileNotFoundError:
+            print(f"\nAPI KEYS FILE NOT FOUND!")
+            print(f"Could not find: {self.keys_path}")
+            
+            if os.path.exists(self.keys_example_path):
+                print(f"\n📝 SETUP INSTRUCTIONS:")
+                print(f"1. Copy the example file to create your API keys file:")
+                print(f"   copy api-keys.json.example api-keys.json")
+                print(f"2. Edit 'api-keys.json' and replace the placeholder values with your real API keys")
+                print(f"\n💡 The example file exists at: {self.keys_example_path}")
+            else:
+                print(f"\nEven the example file is missing: {self.keys_example_path}")
+                print(f"Please ensure you have the complete project files.")
+            
+            print(f"\nBot cannot run without API keys configuration. Exiting...")
             sys.exit(1)
 
         # 2. Initialize Exchange (The Connection)
