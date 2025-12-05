@@ -7,6 +7,9 @@ class BybitClient:
         """
         Initializes the connection with Bybit via CCXT.
         API keys are optional - only needed for trading operations.
+        
+        Note: Market data is ALWAYS fetched from mainnet for accuracy.
+        Testnet only affects trading operations when API keys are provided.
         """
         config = {
             'enableRateLimit': True, 
@@ -21,14 +24,23 @@ class BybitClient:
             config['apiKey'] = api_key
             config['secret'] = api_secret
             print("Authenticated mode enabled")
+            
+            # Only use testnet if we have API keys (for trading)
+            if testnet:
+                self.testnet_mode = True
+                print("WARNING: Testnet mode enabled for TRADING operations")
+            else:
+                self.testnet_mode = False
         else:
             print("Public data mode (no authentication)")
+            self.testnet_mode = False  # Always use mainnet for public data
         
         self.exchange = ccxt.bybit(config)
         
-        if testnet:
+        # Set sandbox mode ONLY if authenticated AND testnet requested
+        if api_key and api_secret and testnet:
             self.exchange.set_sandbox_mode(True)
-            print("WARNING: Bybit Client running in TESTNET mode!")
+            print("Testnet sandbox mode activated for trading")
 
     def get_market_price(self, symbol):
         """Returns the current price of a symbol."""
