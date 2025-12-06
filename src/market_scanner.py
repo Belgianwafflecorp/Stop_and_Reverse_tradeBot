@@ -66,14 +66,6 @@ class MarketScanner:
             # Filter 3: Calculate 24h percentage change using CCXT standardized fields
             percentage = data.get('percentage')
             
-            # Debug specific problem coins
-            if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT', 'SOL/USDT:USDT', 'BTC/USDT:USDT']:
-                print(f"\nDEBUG {symbol}:")
-                print(f"  percentage field: {percentage}")
-                print(f"  open: {data.get('open')}")
-                print(f"  close: {data.get('close')}")
-                print(f"  last: {data.get('last')}")
-            
             if percentage is None:
                 # Fallback: calculate from CCXT's standardized open/close fields
                 open_price = data.get('open')
@@ -81,15 +73,11 @@ class MarketScanner:
                 
                 if open_price and close_price and open_price != 0:
                     percentage = abs(((close_price - open_price) / open_price) * 100)
-                    if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT']:
-                        print(f"  CALCULATED: {percentage:.2f}%")
                 else:
                     continue  # Skip if we can't calculate percentage
             else:
                 # CCXT percentage is already in % format, just make it absolute
                 percentage = abs(percentage)
-                if symbol in ['SAND/USDT:USDT', 'MNT/USDT:USDT', 'SOL/USDT:USDT', 'BTC/USDT:USDT']:
-                    print(f"  USING CCXT: {percentage:.2f}%")
             
             # Filter 4: Skip coins that don't move enough (configurable threshold)
             if percentage < self.timeframe_1_threshold:
