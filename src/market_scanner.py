@@ -155,11 +155,6 @@ class MarketScanner:
             for candidate in candidates_found:
                 print(f"  {candidate['symbol']}: Recent vol: {candidate['recent_vol']:.2f}%, {tf2_display}: {candidate['tf2_move']:.2f}% (Score: {candidate['score']:.2f})")
 
-        # Print only qualifying candidates
-        if candidates_found:
-            for candidate in candidates_found:
-                print(f"  {candidate['symbol']}: Recent vol: {candidate['recent_vol']:.2f}%, {tf2_display}: {candidate['tf2_move']:.2f}% (Score: {candidate['score']:.2f})")
-
         if best_coin:
             print(f"\nWinner: {best_coin} (Score: {highest_score:.2f})")
         else:
