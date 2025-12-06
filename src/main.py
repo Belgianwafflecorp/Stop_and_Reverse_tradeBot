@@ -74,14 +74,14 @@ class TradingBot:
         # 3. Initialize Components
         self.calculator = TradeCalculator(self.config, self.bybit)
         
-        # Dependency Injection: Pass the 'bybit' client to the scanner
-        self.scanner = MarketScanner(self.bybit, self.config)
+        # Account manager for balance and position sizing
+        self.account = AccountManager(self.bybit, self.config)
+        
+        # Dependency Injection: Pass the 'bybit' client and account manager to the scanner
+        self.scanner = MarketScanner(self.bybit, self.config, self.account)
         
         # Position tracker for state management (needs config for cycle detection)
         self.tracker = PositionTracker(self.bybit, self.config)
-        
-        # Account manager for balance and position sizing
-        self.account = AccountManager(self.bybit, self.config)
         
         self.active_coin = None
 

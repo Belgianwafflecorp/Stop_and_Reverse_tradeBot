@@ -11,13 +11,20 @@ class AccountManager:
         self.client = bybit_client
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.leverage = config['strategy']['leverage']
+        self.use_live_balance = config['account']['use_live_balance']
+        self.simulated_balance = config['account']['simulated_balance_usdt']
     
     def get_available_balance(self):
         """
-        Fetches the available USDT balance from the exchange.
+        Fetches the available USDT balance from the exchange or uses simulated balance.
         
         :return: Available balance in USDT
         """
+        # Use simulated balance for backtesting/testing
+        if not self.use_live_balance:
+            return float(self.simulated_balance)
+        
+        # Fetch live balance from exchange
         try:
             balance = self.client.exchange.fetch_balance()
             usdt_balance = balance.get('USDT', {})

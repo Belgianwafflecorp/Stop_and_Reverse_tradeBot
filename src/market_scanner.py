@@ -2,12 +2,14 @@ import pandas as pd
 import time
 
 class MarketScanner:
-    def __init__(self, client, config):
+    def __init__(self, client, config, account_manager=None):
         """
         :param client: Instance of BybitClient (already connected)
         :param config: The full config dictionary
+        :param account_manager: Instance of AccountManager for balance checking
         """
         self.client = client
+        self.account_manager = account_manager
         self.min_volume = config['scanner_settings']['min_volume_usdt']
         self.lookback = config['scanner_settings']['volatility_lookback_candles']
         self.interval = config['scanner_settings']['interval']
@@ -16,6 +18,7 @@ class MarketScanner:
         self.timeframe_1_threshold = config['scanner_settings'].get('timeframe_1_change_pct', 2.0)
         self.timeframe_2_minutes = config['scanner_settings'].get('timeframe_2_minutes', 5)    # 5m default
         self.timeframe_2_threshold = config['scanner_settings'].get('timeframe_2_change_pct', 0.2)
+        self.initial_entry_pct = config['strategy']['initial_entry_pct']
 
     def get_best_volatile_coin(self):
         """
@@ -100,6 +103,13 @@ class MarketScanner:
             
         df = df.sort_values(by='change_pct', ascending=False).head(self.top_k)
         
+        # 4. Filter by minimum order size (if account manager is available)
+        if self.account_manager:
+            df = self._filter_by_min_order_size(df, market_info)
+            if df.empty:
+                print("No coins meet minimum order size requirements.")
+                return None
+        
         tf1_display = self._minutes_to_display(self.timeframe_1_minutes)
         tf2_display = self._minutes_to_display(self.timeframe_2_minutes)
         
@@ -112,34 +122,48 @@ class MarketScanner:
         # 4. Deep Dive: Check recent candles + timeframe_2 movement filter
         best_coin = None
         highest_score = -1
+        candidates_found = []
 
         for symbol in df['symbol'].tolist():
             recent_vol = self.calculate_recent_volatility(symbol)
             timeframe_2_move = self.get_timeframe_movement(symbol, self.timeframe_2_minutes)
             
-            print(f"  {symbol}: Recent vol: {recent_vol:.2f}%, {tf2_display}: {timeframe_2_move:.2f}%")
-            
             # Apply timeframe_2 movement filter
             if timeframe_2_move < self.timeframe_2_threshold:
-                print(f"    ❌ Skipped - insufficient {tf2_display} movement ({timeframe_2_move:.2f}% < {self.timeframe_2_threshold}%)")
                 continue
             
             # Combine both metrics (recent volatility + timeframe_2 movement)
             # Weight: 70% recent volatility + 30% timeframe_2 movement
             combined_score = (recent_vol * 0.7) + (timeframe_2_move * 0.3)
             
+            candidates_found.append({
+                'symbol': symbol,
+                'score': combined_score,
+                'recent_vol': recent_vol,
+                'tf2_move': timeframe_2_move
+            })
+            
             if combined_score > highest_score:
                 highest_score = combined_score
                 best_coin = symbol
-                print(f"    ✅ New best candidate (Score: {combined_score:.2f})")
             
             # Small sleep to respect API rate limits during the loop
             time.sleep(0.1)
+        
+        # Print only qualifying candidates
+        if candidates_found:
+            for candidate in candidates_found:
+                print(f"  {candidate['symbol']}: Recent vol: {candidate['recent_vol']:.2f}%, {tf2_display}: {candidate['tf2_move']:.2f}% (Score: {candidate['score']:.2f})")
+
+        # Print only qualifying candidates
+        if candidates_found:
+            for candidate in candidates_found:
+                print(f"  {candidate['symbol']}: Recent vol: {candidate['recent_vol']:.2f}%, {tf2_display}: {candidate['tf2_move']:.2f}% (Score: {candidate['score']:.2f})")
 
         if best_coin:
-            print(f"\n🎯 Winner found: {best_coin} (Score: {highest_score:.2f})")
+            print(f"\nWinner: {best_coin} (Score: {highest_score:.2f})")
         else:
-            print(f"\n❌ No coins found with sufficient {tf2_display} movement (>{self.timeframe_2_threshold}%)")
+            print(f"\nNo coins found with sufficient {tf2_display} movement (>{self.timeframe_2_threshold}%)")
         
         return best_coin
 
@@ -196,6 +220,45 @@ class MarketScanner:
         except Exception as e:
             print(f"Error checking {self._minutes_to_display(minutes)} movement for {symbol}: {e}")
             return 0
+    
+    def _filter_by_min_order_size(self, df, market_info):
+        """
+        Filters out coins where initial order size is less than exchange minimum.
+        
+        :param df: DataFrame of candidate coins
+        :param market_info: Dictionary mapping symbol to market metadata
+        :return: Filtered DataFrame
+        """
+        balance = self.account_manager.get_available_balance()
+        initial_order_size = balance * (self.initial_entry_pct / 100.0)
+        
+        print(f"\nBalance: ${balance:.2f} | Initial order size: ${initial_order_size:.2f} ({self.initial_entry_pct}%)")
+        print("Checking minimum order sizes...")
+        
+        valid_symbols = []
+        skipped_count = 0
+        
+        for symbol in df['symbol'].tolist():
+            market = market_info.get(symbol, {})
+            limits = market.get('limits', {})
+            cost_limits = limits.get('cost', {})
+            min_cost = cost_limits.get('min')
+            
+            if min_cost is None:
+                # No minimum specified - assume tradeable
+                valid_symbols.append(symbol)
+                continue
+            
+            if initial_order_size >= min_cost:
+                valid_symbols.append(symbol)
+            else:
+                skipped_count += 1
+        
+        if skipped_count > 0:
+            print(f"Skipped {skipped_count} coin(s) due to insufficient balance for minimum order size.")
+        
+        # Return filtered dataframe
+        return df[df['symbol'].isin(valid_symbols)]
     
     def _minutes_to_timeframe(self, minutes):
         """
