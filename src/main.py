@@ -84,9 +84,63 @@ class TradingBot:
         self.tracker = PositionTracker(self.bybit, self.config)
         
         self.active_coin = None
+        
+        # Check for existing open positions on startup
+        self._check_existing_positions()
+    
+    def _check_existing_positions(self):
+        """
+        Checks if there are any open positions on startup.
+        If found, sets the active coin to resume trading.
+        """
+        print("\nChecking for existing open positions...")
+        
+        try:
+            open_positions = self.bybit.fetch_open_positions()
+            
+            if not open_positions:
+                print("No open positions found. Starting fresh.")
+                return
+            
+            # Display all open positions
+            print(f"Found {len(open_positions)} open position(s):")
+            for pos in open_positions:
+                symbol = pos.get('symbol')
+                side = pos.get('side')  # 'long' or 'short'
+                contracts = pos.get('contracts', 0)
+                notional = pos.get('notional', 0)
+                entry_price = pos.get('entryPrice', 0)
+                unrealized_pnl = pos.get('unrealizedPnl', 0)
+                
+                print(f"  {symbol}: {side.upper()} | Size: {contracts} contracts (${notional:.2f}) | Entry: ${entry_price:.4f} | PnL: ${unrealized_pnl:.2f}")
+                
+                # Set the first open position as active coin
+                if not self.active_coin:
+                    self.active_coin = symbol
+                    print(f"\nResuming trading on existing position: {symbol}")
+                    
+                    # Get detailed position state
+                    position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
+                    print(self.tracker.get_position_summary(symbol, lookback_hours=24))
+            
+            if len(open_positions) > 1:
+                print(f"\nWARNING: Multiple open positions detected. Bot will focus on: {self.active_coin}")
+                print("Consider closing other positions manually or updating bot logic to handle multiple positions.")
+        
+        except Exception as e:
+            print(f"Error checking positions: {e}")
+            print("Continuing with fresh start...")
 
     def start_cycle(self):
         """Starts the scanning and trading process."""
+        
+        # Skip scanning if we already have an active position
+        if self.active_coin:
+            print(f"\nContinuing with active position: {self.active_coin}")
+            position_state = self.tracker.analyze_position_state(self.active_coin, lookback_hours=1)
+            print(self.tracker.get_position_summary(self.active_coin, lookback_hours=1))
+            # Here you would execute trading logic for existing position
+            return
         
         # 1. Find the best coin
         self.active_coin = self.scanner.get_best_volatile_coin()

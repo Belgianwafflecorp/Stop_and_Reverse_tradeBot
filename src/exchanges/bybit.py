@@ -46,6 +46,21 @@ class BybitClient:
         """Returns the current price of a symbol."""
         ticker = self.exchange.fetch_ticker(symbol)
         return float(ticker['last'])
+    
+    def fetch_open_positions(self):
+        """
+        Fetches all open positions from the exchange.
+        
+        :return: List of open position dictionaries
+        """
+        try:
+            positions = self.exchange.fetch_positions()
+            # Filter to only positions with actual size
+            open_positions = [p for p in positions if float(p.get('contracts', 0)) != 0]
+            return open_positions
+        except Exception as e:
+            print(f"Error fetching open positions: {e}")
+            return []
 
     def set_leverage(self, symbol, leverage):
         """Sets the leverage for a specific symbol."""
