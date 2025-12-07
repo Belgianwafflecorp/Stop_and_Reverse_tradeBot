@@ -13,6 +13,8 @@ class AccountManager:
         self.leverage = config['strategy']['leverage']
         self.use_live_balance = config['account']['use_live_balance']
         self.simulated_balance = config['account']['simulated_balance_usdt']
+        self.balance_compound = config['account']['balance_compound']
+        self.fixed_initial_order = config['account']['fixed_initial_order_usd']
     
     def get_available_balance(self):
         """
@@ -43,25 +45,33 @@ class AccountManager:
         :param multiplier: Martingale multiplier (if None, uses config value)
         :return: Position size in USDT
         """
-        # Get current balance
-        balance = self.get_available_balance()
-        
-        if balance == 0:
-            print("WARNING: Account balance is 0")
-            return 0.0
-        
-        # Initial entry: use percentage of balance
+        # Initial entry: use percentage of balance OR fixed amount
         if flip_count == 0:
-            base_size = balance * (self.initial_entry_pct / 100.0)
-            return round(base_size, 2)
+            if self.balance_compound:
+                # Compound mode: calculate from current balance
+                balance = self.get_available_balance()
+                
+                if balance == 0:
+                    print("WARNING: Account balance is 0")
+                    return 0.0
+                
+                base_size = balance * (self.initial_entry_pct / 100.0)
+                return round(base_size, 2)
+            else:
+                # Fixed mode: use configured fixed amount
+                return round(self.fixed_initial_order, 2)
         
         # Subsequent entries: apply martingale to previous size
         if previous_size and multiplier:
             next_size = previous_size * multiplier
             return round(next_size, 2)
         
-        # Fallback: return base size
-        return round(balance * (self.initial_entry_pct / 100.0), 2)
+        # Fallback: return initial size
+        if self.balance_compound:
+            balance = self.get_available_balance()
+            return round(balance * (self.initial_entry_pct / 100.0), 2)
+        else:
+            return round(self.fixed_initial_order, 2)
     
     def get_account_summary(self):
         """
@@ -70,13 +80,22 @@ class AccountManager:
         :return: String summary
         """
         balance = self.get_available_balance()
-        base_size = balance * (self.initial_entry_pct / 100.0)
         
         summary = "\n--- Account Summary ---\n"
-        summary += f"Available Balance: ${balance:.2f} USDT\n"
-        summary += f"Initial Entry %: {self.initial_entry_pct}%\n"
-        summary += f"Initial Entry Size: ${base_size:.2f} USDT\n"
+        summary += f"Available Balance: ${balance:.2f} USD\n"
+        
+        if self.balance_compound:
+            base_size = balance * (self.initial_entry_pct / 100.0)
+            summary += f"Mode: COMPOUND\n"
+            summary += f"Initial Entry %: {self.initial_entry_pct}%\n"
+            summary += f"Initial Entry Size: ${base_size:.2f} USD\n"
+        else:
+            summary += f"Mode: FIXED\n"
+            summary += f"Initial Entry Size: ${self.fixed_initial_order:.2f} USD (fixed)\n"
+        
         summary += f"Leverage: {self.leverage}x\n"
         summary += "----------------------\n"
+        
+        return summary
         
         return summary

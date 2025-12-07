@@ -5,7 +5,9 @@
   
   "account": {
     "simulated_balance_usdt": 1000.0,
-    "use_live_balance": false
+    "use_live_balance": false,
+    "balance_compound": true,
+    "fixed_initial_order_usd": 10.0
   },
   
   "scanner_settings": {

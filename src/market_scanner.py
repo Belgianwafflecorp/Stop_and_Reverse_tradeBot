@@ -18,7 +18,9 @@ class MarketScanner:
         self.timeframe_1_threshold = config['scanner_settings'].get('timeframe_1_change_pct', 2.0)
         self.timeframe_2_minutes = config['scanner_settings'].get('timeframe_2_minutes', 5)    # 5m default
         self.timeframe_2_threshold = config['scanner_settings'].get('timeframe_2_change_pct', 0.2)
+        self.balance_compound = config['account']['balance_compound']
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
+        self.fixed_initial_order = config['account']['fixed_initial_order_usd']
 
     def get_best_volatile_coin(self):
         """
@@ -224,10 +226,16 @@ class MarketScanner:
         :param market_info: Dictionary mapping symbol to market metadata
         :return: Filtered DataFrame
         """
-        balance = self.account_manager.get_available_balance()
-        initial_order_size = balance * (self.initial_entry_pct / 100.0)
+        # Calculate initial order size based on compound mode
+        if self.balance_compound:
+            balance = self.account_manager.get_available_balance()
+            initial_order_size = balance * (self.initial_entry_pct / 100.0)
+            size_desc = f"${initial_order_size:.2f} ({self.initial_entry_pct}%)"
+        else:
+            initial_order_size = self.fixed_initial_order
+            size_desc = f"${initial_order_size:.2f} (fixed)"
         
-        print(f"\nBalance: ${balance:.2f} | Initial order size: ${initial_order_size:.2f} ({self.initial_entry_pct}%)")
+        print(f"\nInitial order size: {size_desc}")
         print("Checking minimum order sizes...")
         
         valid_symbols = []
