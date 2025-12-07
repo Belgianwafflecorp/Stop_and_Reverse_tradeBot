@@ -26,9 +26,15 @@
     "martingale_multiplier": 2.1,  
     "flip_threshold_pct": 1.0,     
     
-    "take_profit": {
+    "exit_use_trailing": true,
+    
+    "exit_trailing": {
       "activation_pct": 1.0,       
       "callback_pct": 0.5          
+    },
+    
+    "exit_static": {
+      "profit_target_pct": 1.0
     }
   }
 }

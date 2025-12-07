@@ -4,6 +4,16 @@ class TradeCalculator:
         self.multiplier = config['strategy']['martingale_multiplier']
         self.max_flips = config['strategy']['max_flips']
         
+        # Exit mode configuration
+        self.exit_use_trailing = config['strategy'].get('exit_use_trailing', True)
+        
+        # Trailing TP settings
+        self.tp_activation = config['strategy']['exit_trailing']['activation_pct']
+        self.tp_callback = config['strategy']['exit_trailing']['callback_pct']
+        
+        # Static TP settings
+        self.static_tp_pct = config['strategy']['exit_static']['profit_target_pct']
+        
         # Fetch live fees from exchange if client is provided
         self.client = bybit_client
         if bybit_client:
@@ -14,6 +24,9 @@ class TradeCalculator:
             # Fallback to config if no client provided
             self.fee_rate = config['strategy']['fees'].get('taker_fee_rate', 0.0006)
             print(f"Using config fee rate: {self.fee_rate*100:.3f}%")
+        
+        exit_type = "TRAILING" if self.exit_use_trailing else "STATIC"
+        print(f"Exit mode: {exit_type}")
 
     def calculate_next_position(self, current_flip_count, previous_size, realized_loss):
         """
@@ -45,3 +58,74 @@ class TradeCalculator:
             return entry_price * (1 + required_move_pct)
         else:
             return entry_price * (1 - required_move_pct)
+    
+    def calculate_take_profit_price(self, entry_price, direction):
+        """
+        Calculates the take profit price based on exit mode.
+        
+        :param entry_price: Entry price of the position
+        :param direction: 'long' or 'short'
+        :return: Take profit price (for static mode) or None (for trailing mode)
+        """
+        if not self.exit_use_trailing:
+            # Static TP: Fixed percentage target
+            if direction.lower() == 'long':
+                tp_price = entry_price * (1 + self.static_tp_pct / 100)
+            else:
+                tp_price = entry_price * (1 - self.static_tp_pct / 100)
+            return round(tp_price, 4)
+        else:
+            # Trailing mode: No fixed TP, managed dynamically
+            return None
+    
+    def check_trailing_exit(self, entry_price, current_price, peak_price, direction):
+        """
+        Checks if trailing take profit should trigger.
+        
+        :param entry_price: Entry price of position
+        :param current_price: Current market price
+        :param peak_price: Highest (for long) or lowest (for short) price since entry
+        :param direction: 'long' or 'short'
+        :return: (should_exit, reason)
+        """
+        if not self.exit_use_trailing:
+            return False, None
+        
+        if direction.lower() == 'long':
+            # Calculate profit from entry
+            profit_pct = ((current_price - entry_price) / entry_price) * 100
+            
+            # Check if activation threshold reached
+            if profit_pct < self.tp_activation:
+                return False, None
+            
+            # Calculate drawdown from peak
+            if peak_price and peak_price > entry_price:
+                drawdown_pct = ((peak_price - current_price) / peak_price) * 100
+                
+                if drawdown_pct >= self.tp_callback:
+                    return True, f"Trailing TP triggered: {drawdown_pct:.2f}% callback from peak"
+        else:
+            # Short position
+            profit_pct = ((entry_price - current_price) / entry_price) * 100
+            
+            if profit_pct < self.tp_activation:
+                return False, None
+            
+            # For shorts, peak is the lowest price
+            if peak_price and peak_price < entry_price:
+                drawdown_pct = ((current_price - peak_price) / peak_price) * 100
+                
+                if drawdown_pct >= self.tp_callback:
+                    return True, f"Trailing TP triggered: {drawdown_pct:.2f}% callback from low"
+        
+        return False, None
+    
+    def get_exit_info(self):
+        """
+        Returns human-readable exit configuration.
+        """
+        if self.exit_use_trailing:
+            return f"Trailing TP: Activate at +{self.tp_activation}%, callback {self.tp_callback}%"
+        else:
+            return f"Static TP: +{self.static_tp_pct}% target"
