@@ -153,14 +153,17 @@ class TradingBot:
             return
         
         # 1. Find the best coin
-        self.active_coin = self.scanner.get_best_volatile_coin()
+        coin_info = self.scanner.get_best_volatile_coin()
         
-        if not self.active_coin:
+        if not coin_info:
             print("No coin found. Waiting 60 seconds.")
             time.sleep(60)
             return
 
-        print(f"Starting cycle on {self.active_coin}")
+        self.active_coin = coin_info['symbol']
+        self.entry_direction = coin_info['direction']
+        
+        print(f"\nStarting cycle on {self.active_coin} - Entry Direction: {self.entry_direction}")
         
         # Check current position state before trading
         position_state = self.tracker.analyze_position_state(self.active_coin, lookback_hours=1)

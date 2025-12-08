@@ -123,12 +123,13 @@ class MarketScanner:
 
         # 4. Deep Dive: Check recent candles + timeframe_2 movement filter
         best_coin = None
+        best_direction = None
         highest_score = -1
         candidates_found = []
 
         for symbol in df['symbol'].tolist():
             recent_vol = self.calculate_recent_volatility(symbol)
-            timeframe_2_move = self.get_timeframe_movement(symbol, self.timeframe_2_minutes)
+            timeframe_2_move, direction = self.get_timeframe_movement(symbol, self.timeframe_2_minutes)
             
             # Apply timeframe_2 movement filter
             if timeframe_2_move < self.timeframe_2_threshold:
@@ -142,12 +143,14 @@ class MarketScanner:
                 'symbol': symbol,
                 'score': combined_score,
                 'recent_vol': recent_vol,
-                'tf2_move': timeframe_2_move
+                'tf2_move': timeframe_2_move,
+                'direction': direction
             })
             
             if combined_score > highest_score:
                 highest_score = combined_score
                 best_coin = symbol
+                best_direction = direction
             
             # Small sleep to respect API rate limits during the loop
             time.sleep(0.1)
@@ -155,14 +158,15 @@ class MarketScanner:
         # Print only qualifying candidates
         if candidates_found:
             for candidate in candidates_found:
-                print(f"  {candidate['symbol']}: Recent vol: {candidate['recent_vol']:.2f}%, {tf2_display}: {candidate['tf2_move']:.2f}% (Score: {candidate['score']:.2f})")
+                print(f"  {candidate['symbol']}: Recent vol: {candidate['recent_vol']:.2f}%, {tf2_display}: {candidate['tf2_move']:.2f}% (Score: {candidate['score']:.2f}) [{candidate['direction']}]")
 
         if best_coin:
-            print(f"\nWinner: {best_coin} (Score: {highest_score:.2f})")
+            print(f"\nWinner: {best_coin} (Score: {highest_score:.2f}) - Direction: {best_direction}")
+            return {'symbol': best_coin, 'direction': best_direction}
         else:
             print(f"\nNo coins found with sufficient {tf2_display} movement (>{self.timeframe_2_threshold}%)")
         
-        return best_coin
+        return None
 
     def calculate_recent_volatility(self, symbol):
         """
@@ -194,14 +198,16 @@ class MarketScanner:
     def get_timeframe_movement(self, symbol, minutes):
         """
         Gets the percentage change for a specific timeframe in minutes.
-        Converts minutes to exchange format and returns the percentage change.
+        Converts minutes to exchange format and returns the percentage change and direction.
+        
+        :return: (change_pct, direction) - direction is 'LONG' if price rising, 'SHORT' if falling
         """
         try:
             timeframe = self._minutes_to_timeframe(minutes)
             # Fetch just the last 2 candles (current + previous)
             candles = self.client.fetch_candles(symbol, timeframe, 2)
             if len(candles) < 2:
-                return 0
+                return 0, 'LONG'
             
             # Get the most recent completed candle
             latest_candle = candles[-1]
@@ -210,13 +216,15 @@ class MarketScanner:
             
             if open_price > 0:
                 change_pct = abs(((close_price - open_price) / open_price) * 100)
-                return change_pct
+                # Determine direction based on price movement
+                direction = 'LONG' if close_price > open_price else 'SHORT'
+                return change_pct, direction
             
-            return 0
+            return 0, 'LONG'
             
         except Exception as e:
             print(f"Error checking {self._minutes_to_display(minutes)} movement for {symbol}: {e}")
-            return 0
+            return 0, 'LONG'
     
     def _filter_by_min_order_size(self, df, market_info):
         """
