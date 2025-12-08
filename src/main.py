@@ -19,9 +19,19 @@ def load_json(path):
         return json.load(f)
 
 class TradingBot:
-    def __init__(self):
+    def __init__(self, config_file=None):
         # 1. Load Configs
-        self.config_path = os.path.join(PROJECT_ROOT, 'configs', 'config.json')
+        if config_file:
+            # Use provided config file path
+            if os.path.isabs(config_file):
+                self.config_path = config_file
+            else:
+                self.config_path = os.path.join(PROJECT_ROOT, config_file)
+            print(f"Using config: {os.path.basename(self.config_path)}")
+        else:
+            # Default to config.json
+            self.config_path = os.path.join(PROJECT_ROOT, 'configs', 'config.json')
+        
         self.keys_path = os.path.join(PROJECT_ROOT, 'api-keys.json')
         self.keys_example_path = os.path.join(PROJECT_ROOT, 'api-keys.json.example')
 
@@ -174,5 +184,10 @@ class TradingBot:
                 time.sleep(10)
 
 if __name__ == "__main__":
-    bot = TradingBot()
+    # Check for command-line argument for config file
+    config_file = None
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    
+    bot = TradingBot(config_file)
     bot.run()

@@ -10,7 +10,7 @@ class MarketScanner:
         """
         self.client = client
         self.account_manager = account_manager
-        self.min_volume = config['scanner_settings']['min_volume_usdt']
+        self.min_volume = config['scanner_settings']['min_volume_usd']
         self.lookback = config['scanner_settings']['volatility_lookback_candles']
         self.interval = config['scanner_settings']['interval']
         self.top_k = config['scanner_settings']['top_k_candidates']

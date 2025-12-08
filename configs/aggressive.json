@@ -15,10 +15,10 @@
     "volatility_lookback_candles": 10,
     "interval": "5m",
     "top_k_candidates": 20,
-    "timeframe_1_minutes": 720,
-    "timeframe_1_change_pct": 2.0,
+    "timeframe_1_minutes": 60,
+    "timeframe_1_change_pct": 3.0,
     "timeframe_2_minutes": 5,
-    "timeframe_2_change_pct": 1.0
+    "timeframe_2_change_pct": 0.5
   },
   
   "strategy": {

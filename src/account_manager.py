@@ -12,7 +12,7 @@ class AccountManager:
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.leverage = config['strategy']['leverage']
         self.use_live_balance = config['account']['use_live_balance']
-        self.simulated_balance = config['account']['simulated_balance_usdt']
+        self.simulated_balance = config['account']['simulated_balance_usd']
         self.balance_compound = config['account']['balance_compound']
         self.fixed_initial_order = config['account']['fixed_initial_order_usd']
     
