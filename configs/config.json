@@ -25,18 +25,10 @@
     "initial_entry_pct": 1.0,
     "max_flips": 5,
     "leverage": 10,
-    "martingale_multiplier": 2.1,  
-    "flip_threshold_pct": 1.0,     
-    
-    "exit_use_trailing": true,
-    
-    "exit_trailing": {
-      "activation_pct": 1.0,       
-      "callback_pct": 0.5          
-    },
-    
-    "exit_static": {
-      "profit_target_pct": 1.0
-    }
+    "martingale_multiplier": 2.1,
+    "range_pct": 1.0,
+    "trailing_retracement_pct": 0.5,
+    "market_orders_cycle_start": true,
+    "exit_use_trailing": true
   }
 }

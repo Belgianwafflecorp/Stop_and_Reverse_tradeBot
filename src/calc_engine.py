@@ -4,15 +4,12 @@ class TradeCalculator:
         self.multiplier = config['strategy']['martingale_multiplier']
         self.max_flips = config['strategy']['max_flips']
         
+        # Range configuration - used for both flips and TP
+        self.range_pct = config['strategy']['range_pct']
+        
         # Exit mode configuration
         self.exit_use_trailing = config['strategy'].get('exit_use_trailing', True)
-        
-        # Trailing TP settings
-        self.tp_activation = config['strategy']['exit_trailing']['activation_pct']
-        self.tp_callback = config['strategy']['exit_trailing']['callback_pct']
-        
-        # Static TP settings
-        self.static_tp_pct = config['strategy']['exit_static']['profit_target_pct']
+        self.trailing_retracement_pct = config['strategy']['trailing_retracement_pct']
         
         # Fetch live fees from exchange if client is provided
         self.client = bybit_client
@@ -27,6 +24,7 @@ class TradeCalculator:
         
         exit_type = "TRAILING" if self.exit_use_trailing else "STATIC"
         print(f"Exit mode: {exit_type}")
+        print(f"Range: {self.range_pct}% (flip trigger & TP activation)")
 
     def calculate_next_position(self, current_flip_count, previous_size, realized_loss):
         """
@@ -62,17 +60,18 @@ class TradeCalculator:
     def calculate_take_profit_price(self, entry_price, direction):
         """
         Calculates the take profit price based on exit mode.
+        Uses range_pct for both static TP and trailing activation.
         
         :param entry_price: Entry price of the position
         :param direction: 'long' or 'short'
         :return: Take profit price (for static mode) or None (for trailing mode)
         """
         if not self.exit_use_trailing:
-            # Static TP: Fixed percentage target
+            # Static TP: Fixed percentage target at range_pct
             if direction.lower() == 'long':
-                tp_price = entry_price * (1 + self.static_tp_pct / 100)
+                tp_price = entry_price * (1 + self.range_pct / 100)
             else:
-                tp_price = entry_price * (1 - self.static_tp_pct / 100)
+                tp_price = entry_price * (1 - self.range_pct / 100)
             return round(tp_price, 4)
         else:
             # Trailing mode: No fixed TP, managed dynamically
@@ -81,6 +80,7 @@ class TradeCalculator:
     def check_trailing_exit(self, entry_price, current_price, peak_price, direction):
         """
         Checks if trailing take profit should trigger.
+        Activates at range_pct profit, exits on callback_pct drawback.
         
         :param entry_price: Entry price of position
         :param current_price: Current market price
@@ -95,28 +95,28 @@ class TradeCalculator:
             # Calculate profit from entry
             profit_pct = ((current_price - entry_price) / entry_price) * 100
             
-            # Check if activation threshold reached
-            if profit_pct < self.tp_activation:
+            # Check if activation threshold reached (uses range_pct)
+            if profit_pct < self.range_pct:
                 return False, None
             
             # Calculate drawdown from peak
             if peak_price and peak_price > entry_price:
                 drawdown_pct = ((peak_price - current_price) / peak_price) * 100
                 
-                if drawdown_pct >= self.tp_callback:
+                if drawdown_pct >= self.trailing_retracement_pct:
                     return True, f"Trailing TP triggered: {drawdown_pct:.2f}% callback from peak"
         else:
             # Short position
             profit_pct = ((entry_price - current_price) / entry_price) * 100
             
-            if profit_pct < self.tp_activation:
+            if profit_pct < self.range_pct:
                 return False, None
             
             # For shorts, peak is the lowest price
             if peak_price and peak_price < entry_price:
                 drawdown_pct = ((current_price - peak_price) / peak_price) * 100
                 
-                if drawdown_pct >= self.tp_callback:
+                if drawdown_pct >= self.trailing_retracement_pct:
                     return True, f"Trailing TP triggered: {drawdown_pct:.2f}% callback from low"
         
         return False, None
@@ -126,6 +126,7 @@ class TradeCalculator:
         Returns human-readable exit configuration.
         """
         if self.exit_use_trailing:
-            return f"Trailing TP: Activate at +{self.tp_activation}%, callback {self.tp_callback}%"
+            return f"Trailing TP: Activate at +{self.range_pct}%, callback {self.trailing_retracement_pct}%"
         else:
-            return f"Static TP: +{self.static_tp_pct}% target"
+            return f"Static TP: +{self.range_pct}% target"
+

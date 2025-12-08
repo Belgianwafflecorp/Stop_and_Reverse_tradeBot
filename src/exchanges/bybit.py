@@ -73,6 +73,18 @@ class BybitClient:
     def create_market_order(self, symbol, side, amount, params={}):
         """Places a market order."""
         return self.exchange.create_order(symbol, 'market', side, amount, params=params)
+    
+    def create_limit_order(self, symbol, side, amount, price, params={}):
+        """Places a limit order at a specific price."""
+        return self.exchange.create_order(symbol, 'limit', side, amount, price, params=params)
+    
+    def cancel_order(self, order_id, symbol):
+        """Cancels an open order."""
+        return self.exchange.cancel_order(order_id, symbol)
+    
+    def fetch_open_orders(self, symbol=None):
+        """Fetches all open orders, optionally filtered by symbol."""
+        return self.exchange.fetch_open_orders(symbol)
 
     # Scanner methods
 
