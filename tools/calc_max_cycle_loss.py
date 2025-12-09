@@ -16,19 +16,15 @@ Example:
     python calc_max_cycle_loss.py custom_config.json
 """
 
-import json
 import sys
 import os
 
+# Add parent directory to path to import from src
+script_dir = os.path.dirname(os.path.abspath(__file__))
+project_root = os.path.dirname(script_dir)
+sys.path.insert(0, project_root)
 
-def load_config(config_path):
-    """Load configuration from JSON file."""
-    if not os.path.exists(config_path):
-        print(f"ERROR: Config file not found: {config_path}")
-        sys.exit(1)
-    
-    with open(config_path, 'r') as f:
-        return json.load(f)
+from src.json_handler import load_config, get_config_path
 
 
 def calculate_max_cycle_loss(config):
@@ -147,20 +143,15 @@ def print_results(results):
 def main():
     """Main entry point."""
     # Determine config file path
-    if len(sys.argv) > 1:
-        config_path = sys.argv[1]
-    else:
-        # Default to configs/config.json relative to script location
-        script_dir = os.path.dirname(os.path.abspath(__file__))
-        config_path = os.path.join(script_dir, '..', 'configs', 'config.json')
+    config_file = sys.argv[1] if len(sys.argv) > 1 else None
     
-    # Resolve to absolute path
-    config_path = os.path.abspath(config_path)
-    
-    print(f"Loading configuration from: {config_path}")
-    
-    # Load config
-    config = load_config(config_path)
+    try:
+        config_path = get_config_path(config_file)
+        print(f"Loading configuration from: {config_path}")
+        config = load_config(config_file)
+    except FileNotFoundError as e:
+        print(f"ERROR: {e}")
+        sys.exit(1)
     
     # Calculate
     results = calculate_max_cycle_loss(config)
