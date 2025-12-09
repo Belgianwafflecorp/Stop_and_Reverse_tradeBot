@@ -294,13 +294,45 @@ class TradingBot:
             # Wait for entry to fill
             time.sleep(2)
             
+            # Fetch actual fill price from position (market orders may have slippage)
+            positions = self.bybit.fetch_open_positions()
+            actual_entry_price = None
+            for pos in positions:
+                if pos['symbol'] == symbol and pos['side'] == position_side:
+                    actual_entry_price = float(pos.get('entryPrice', 0))
+                    actual_contracts = abs(float(pos.get('contracts', 0)))
+                    break
+            
+            # If we can't get actual entry, use estimated price
+            if actual_entry_price is None or actual_entry_price == 0:
+                print(f"   WARNING: Could not fetch actual entry price, using estimate")
+                actual_entry_price = current_price
+                actual_contracts = contracts
+            else:
+                # Show slippage if any
+                slippage_pct = ((actual_entry_price - current_price) / current_price) * 100
+                if abs(slippage_pct) > 0.01:
+                    print(f"   Actual fill: ${actual_entry_price:.6f} (slippage: {slippage_pct:+.2f}%)")
+            
+            # Recalculate TP and Flip prices based on ACTUAL entry price
+            if position_side == 'long':
+                take_profit_price = actual_entry_price * (1 + range_pct / 100)
+                flip_trigger_price = actual_entry_price * (1 - range_pct / 100)
+            else:
+                take_profit_price = actual_entry_price * (1 - range_pct / 100)
+                flip_trigger_price = actual_entry_price * (1 + range_pct / 100)
+            
+            # Recalculate flip size based on actual entry
+            flip_size_usd = (actual_contracts * actual_entry_price) * multiplier
+            flip_contracts = flip_size_usd / flip_trigger_price
+            
             # 2. Place TP order (reduces position at profit target)
             tp_side = 'sell' if position_side == 'long' else 'buy'
-            print(f"\n2. Take Profit: LIMIT at ${take_profit_price:.6f}")
+            print(f"\n2. Take Profit: LIMIT at ${take_profit_price:.6f} (based on actual entry)")
             tp_order = self.bybit.create_limit_order(
                 symbol=symbol,
                 side=tp_side,
-                amount=contracts,
+                amount=actual_contracts,
                 price=take_profit_price,
                 position_side=position_side,
                 params={'reduceOnly': True}
@@ -308,7 +340,7 @@ class TradingBot:
             print(f"   {tp_order.get('id', 'N/A')}")
             
             # 3. Place flip order (conditional order - only triggers when price hits level)
-            print(f"\n3. Flip Order: CONDITIONAL {flip_side.upper()} at ${flip_trigger_price:.6f}")
+            print(f"\n3. Flip Order: CONDITIONAL {flip_side.upper()} at ${flip_trigger_price:.6f} (based on actual entry)")
             flip_order = self.bybit.create_conditional_order(
                 symbol=symbol,
                 side=flip_side,
