@@ -1,6 +1,8 @@
 import ccxt
+import ccxt.pro as ccxtpro
 import asyncio
 import time
+from ccxt.base.errors import NetworkError, ExchangeError
 
 class BybitClient:
     def __init__(self, api_key=None, api_secret=None, testnet=False):
@@ -35,12 +37,25 @@ class BybitClient:
             print("Public data mode (no authentication)")
             self.testnet_mode = False  # Always use mainnet for public data
         
+        # Regular CCXT for REST API (trading)
         self.exchange = ccxt.bybit(config)
+        
+        # CCXT Pro for WebSocket (monitoring)
+        self.exchange_ws = ccxtpro.bybit(config)
         
         # Set sandbox mode ONLY if authenticated AND testnet requested
         if api_key and api_secret and testnet:
             self.exchange.set_sandbox_mode(True)
             print("Testnet sandbox mode activated for trading")
+        
+        # Set position mode to Hedge Mode if authenticated
+        if api_key and api_secret:
+            try:
+                # Set position mode to Hedge Mode (allows separate long/short positions)
+                self.exchange.set_position_mode(True)  # True = Hedge Mode
+                print("Position mode set to Hedge Mode")
+            except Exception as e:
+                print(f"Note: Position mode setting: {e}")
 
     def get_market_price(self, symbol):
         """Returns the current price of a symbol."""
@@ -61,6 +76,37 @@ class BybitClient:
         except Exception as e:
             print(f"Error fetching open positions: {e}")
             return []
+    
+    async def watch_positions(self, symbol=None):
+        """
+        Watch positions in real-time using WebSocket (CCXT Pro).
+        Uses watch_ticker for real-time price updates and checks positions.
+        
+        :param symbol: Symbol to monitor (e.g., 'BTC/USDT:USDT')
+        :return: Generator yielding position updates
+        """
+        try:
+            last_position_check = 0
+            
+            while True:
+                # Watch ticker for real-time price updates using CCXT Pro
+                ticker = await self.exchange_ws.watch_ticker(symbol)
+                
+                # Check positions every 1.5 seconds for faster flip detection
+                current_time = time.time()
+                if current_time - last_position_check >= 1.5:
+                    positions = self.fetch_open_positions()
+                    
+                    # Filter to symbol
+                    if symbol:
+                        positions = [p for p in positions if p['symbol'] == symbol]
+                    
+                    yield positions
+                    last_position_check = current_time
+                    
+        except Exception as e:
+            print(f"WebSocket error in watch_positions: {e}")
+            raise
 
     def set_leverage(self, symbol, leverage):
         """Sets the leverage for a specific symbol."""
@@ -70,13 +116,94 @@ class BybitClient:
         except Exception as e:
             pass # Ignore if leverage is already set
 
-    def create_market_order(self, symbol, side, amount, params={}):
-        """Places a market order."""
-        return self.exchange.create_order(symbol, 'market', side, amount, params=params)
+    def create_market_order(self, symbol, side, amount, position_side='long', take_profit=None, stop_loss=None, params={}):
+        """
+        Places a market order with optional TP/SL.
+        Uses Hedge Mode: positionIdx=1 for long, positionIdx=2 for short
+        
+        :param take_profit: Take profit price (optional)
+        :param stop_loss: Stop loss price (optional)
+        """
+        # Bybit Hedge Mode requires positionIdx parameter
+        # 1 = Long position, 2 = Short position
+        default_params = {'positionIdx': 1 if position_side == 'long' else 2}
+        
+        # Add TP/SL if provided
+        if take_profit:
+            default_params['takeProfit'] = take_profit
+        if stop_loss:
+            default_params['stopLoss'] = stop_loss
+        
+        default_params.update(params)
+        return self.exchange.create_order(symbol, 'market', side, amount, params=default_params)
     
-    def create_limit_order(self, symbol, side, amount, price, params={}):
-        """Places a limit order at a specific price."""
-        return self.exchange.create_order(symbol, 'limit', side, amount, price, params=params)
+    def create_limit_order(self, symbol, side, amount, price, position_side='long', take_profit=None, stop_loss=None, params={}):
+        """
+        Places a limit order at a specific price with optional TP/SL.
+        Uses Hedge Mode: positionIdx=1 for long, positionIdx=2 for short
+        
+        :param take_profit: Take profit price (optional)
+        :param stop_loss: Stop loss price (optional)
+        """
+        # Bybit Hedge Mode requires positionIdx parameter
+        default_params = {'positionIdx': 1 if position_side == 'long' else 2}
+        
+        # Add TP/SL if provided
+        if take_profit:
+            default_params['takeProfit'] = take_profit
+        if stop_loss:
+            default_params['stopLoss'] = stop_loss
+        
+        default_params.update(params)
+        return self.exchange.create_order(symbol, 'limit', side, amount, price, params=default_params)
+    
+    def create_conditional_order(self, symbol, side, amount, trigger_price, position_side='long', order_type='Limit', limit_price=None, params={}):
+        """
+        Places a conditional (trigger) order that only executes when price hits trigger_price.
+        This is used for flip orders - opens opposite position when triggered.
+        
+        :param trigger_price: Price that triggers the order
+        :param position_side: The position this order will OPEN ('long' or 'short')
+        :param order_type: 'Market' or 'Limit' (capitalized for Bybit)
+        :param limit_price: If order_type='Limit', the execution price after trigger
+        """
+        # For Bybit conditional orders, we need:
+        # - triggerPrice: When to activate the order
+        # - triggerDirection: 1=rise above, 2=fall below
+        # - orderType: Market or Limit
+        # - price: Execution price (for Limit orders)
+        
+        # Determine trigger direction based on the POSITION being opened:
+        # - Opening LONG position (flip from short): price must RISE to trigger → triggerDirection=1
+        # - Opening SHORT position (flip from long): price must FALL to trigger → triggerDirection=2
+        if position_side == 'long':
+            trigger_direction = 1  # Opening LONG: trigger when price rises above trigger_price
+        else:
+            trigger_direction = 2  # Opening SHORT: trigger when price falls below trigger_price
+        
+        # Execution price for limit orders
+        exec_price = limit_price if limit_price else trigger_price
+        
+        default_params = {
+            'positionIdx': 1 if position_side == 'long' else 2,
+            'triggerPrice': str(trigger_price),
+            'triggerDirection': trigger_direction,
+            'orderType': order_type,
+            'triggerBy': 'LastPrice',
+        }
+        
+        default_params.update(params)
+        
+        # Use CCXT's create_order with conditional parameters
+        # For Bybit, conditional orders use regular create_order with trigger params
+        return self.exchange.create_order(
+            symbol, 
+            order_type.lower(),  # 'limit' or 'market'
+            side, 
+            amount, 
+            exec_price if order_type == 'Limit' else None,
+            params=default_params
+        )
     
     def cancel_order(self, order_id, symbol):
         """Cancels an open order."""

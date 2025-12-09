@@ -5,9 +5,9 @@
   
   "account": {
     "simulated_balance_usd": 1000.0,
-    "use_live_balance": false,
-    "balance_compound": true,
-    "fixed_initial_order_usd": 10.0
+    "use_live_balance": true,
+    "balance_compound": false,
+    "fixed_initial_order_usd": 5.0
   },
   
   "scanner_settings": {
@@ -18,7 +18,7 @@
     "timeframe_1_minutes": 720,
     "timeframe_1_change_pct": 2.0,
     "timeframe_2_minutes": 5,
-    "timeframe_2_change_pct": 1.0
+    "timeframe_2_change_pct": 1.5
   },
   
   "strategy": {
@@ -29,6 +29,6 @@
     "range_pct": 1.0,
     "trailing_retracement_pct": 0.5,
     "market_orders_cycle_start": true,
-    "exit_use_trailing": true
+    "exit_use_trailing": false
   }
 }

@@ -29,11 +29,36 @@ class AccountManager:
         # Fetch live balance from exchange
         try:
             balance = self.client.exchange.fetch_balance()
+            
+            # Try multiple ways to get USDT balance (Bybit structure varies)
             usdt_balance = balance.get('USDT', {})
-            available = usdt_balance.get('free', 0.0)
+            available = usdt_balance.get('free', None)
+            
+            # If free is None, try 'availableBalance' (derivatives)
+            if available is None:
+                available = usdt_balance.get('availableBalance', None)
+            
+            # Try info structure (some Bybit endpoints)
+            if available is None and 'info' in balance:
+                for item in balance.get('info', {}).get('result', {}).get('list', []):
+                    if item.get('coin') == 'USDT':
+                        available = float(item.get('availableToWithdraw', 0))
+                        break
+            
+            # Fallback to total balance
+            if available is None:
+                available = balance.get('total', {}).get('USDT', 0.0)
+            
+            if available is None:
+                print(f"Warning: Could not parse balance from response")
+                print(f"Balance structure: {balance}")
+                return 0.0
+            
             return float(available)
         except Exception as e:
             print(f"Error fetching balance: {e}")
+            import traceback
+            traceback.print_exc()
             return 0.0
     
     def calculate_position_size(self, flip_count=0, previous_size=None, multiplier=None):
