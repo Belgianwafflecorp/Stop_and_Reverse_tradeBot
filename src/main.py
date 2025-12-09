@@ -495,6 +495,73 @@ class TradingBot:
                 entry_price = float(current_position.get('entryPrice', 0))
                 current_price = self.bybit.get_market_price(symbol)
                 
+                # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
+                range_pct = self.config['strategy']['range_pct']
+                
+                if position_side == 'long':
+                    # Long position - flip trigger is BELOW entry (price falling)
+                    flip_trigger = entry_price * (1 - range_pct / 100)
+                    flip_triggered = current_price <= flip_trigger
+                else:
+                    # Short position - flip trigger is ABOVE entry (price rising)
+                    flip_trigger = entry_price * (1 + range_pct / 100)
+                    flip_triggered = current_price >= flip_trigger
+                
+                if flip_triggered:
+                    print(f" PRICE-BASED FLIP TRIGGER! Current: ${current_price:.6f}, Trigger: ${flip_trigger:.6f}")
+                    print(f"   Position at risk - executing immediate flip to prevent liquidation")
+                    
+                    # Cancel existing conditional orders
+                    try:
+                        open_orders = self.bybit.fetch_open_orders(symbol)
+                        for order in open_orders:
+                            try:
+                                self.bybit.cancel_order(order['id'], symbol)
+                                print(f"   Cancelled: {order['id']}")
+                            except Exception as e:
+                                print(f"   Cancel error: {e}")
+                    except Exception as e:
+                        print(f"   Error fetching orders: {e}")
+                    
+                    # Calculate flip details
+                    multiplier = self.config['strategy']['martingale_multiplier']
+                    position_size_usd = position_contracts * entry_price
+                    flip_size_usd = position_size_usd * multiplier
+                    flip_contracts = flip_size_usd / current_price
+                    
+                    flip_side = 'sell' if position_side == 'long' else 'buy'
+                    flip_position_side = 'short' if position_side == 'long' else 'long'
+                    
+                    # Execute flip at market price
+                    print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                    flip_order = self.bybit.create_market_order(
+                        symbol=symbol,
+                        side=flip_side,
+                        amount=flip_contracts,
+                        position_side=flip_position_side
+                    )
+                    print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                    
+                    # Wait for fill then cleanup
+                    time.sleep(2)
+                    positions = self.bybit.fetch_open_positions()
+                    long_pos = None
+                    short_pos = None
+                    
+                    for pos in positions:
+                        if pos['symbol'] == symbol:
+                            if pos['side'] == 'long':
+                                long_pos = pos
+                            elif pos['side'] == 'short':
+                                short_pos = pos
+                    
+                    if long_pos and short_pos:
+                        self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                    else:
+                        print("   WARNING: Expected both positions after flip")
+                    
+                    continue
+                
                 # No status printing - only flip and cycle completion events are logged
                     
         except Exception as e:
@@ -555,6 +622,71 @@ class TradingBot:
                 position_contracts = abs(float(current_position.get('contracts', 0)))
                 entry_price = float(current_position.get('entryPrice', 0))
                 current_price = self.bybit.get_market_price(symbol)
+                
+                # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
+                range_pct = self.config['strategy']['range_pct']
+                
+                if position_side == 'long':
+                    flip_trigger = entry_price * (1 - range_pct / 100)
+                    flip_triggered = current_price <= flip_trigger
+                else:
+                    flip_trigger = entry_price * (1 + range_pct / 100)
+                    flip_triggered = current_price >= flip_trigger
+                
+                if flip_triggered:
+                    print(f" PRICE-BASED FLIP TRIGGER! Current: ${current_price:.6f}, Trigger: ${flip_trigger:.6f}")
+                    print(f"   Position at risk - executing immediate flip to prevent liquidation")
+                    
+                    # Cancel existing orders
+                    try:
+                        open_orders = self.bybit.fetch_open_orders(symbol)
+                        for order in open_orders:
+                            try:
+                                self.bybit.cancel_order(order['id'], symbol)
+                                print(f"   Cancelled: {order['id']}")
+                            except Exception as e:
+                                print(f"   Cancel error: {e}")
+                    except Exception as e:
+                        print(f"   Error fetching orders: {e}")
+                    
+                    # Calculate flip details
+                    multiplier = self.config['strategy']['martingale_multiplier']
+                    position_size_usd = position_contracts * entry_price
+                    flip_size_usd = position_size_usd * multiplier
+                    flip_contracts = flip_size_usd / current_price
+                    
+                    flip_side = 'sell' if position_side == 'long' else 'buy'
+                    flip_position_side = 'short' if position_side == 'long' else 'long'
+                    
+                    # Execute flip at market price
+                    print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                    flip_order = self.bybit.create_market_order(
+                        symbol=symbol,
+                        side=flip_side,
+                        amount=flip_contracts,
+                        position_side=flip_position_side
+                    )
+                    print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                    
+                    # Wait for fill then cleanup
+                    time.sleep(2)
+                    positions = self.bybit.fetch_open_positions()
+                    long_pos = None
+                    short_pos = None
+                    
+                    for pos in positions:
+                        if pos['symbol'] == symbol:
+                            if pos['side'] == 'long':
+                                long_pos = pos
+                            elif pos['side'] == 'short':
+                                short_pos = pos
+                    
+                    if long_pos and short_pos:
+                        self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                    else:
+                        print("   WARNING: Expected both positions after flip")
+                    
+                    continue
                 
                 # No status printing - only important events logged
                 
