@@ -12,10 +12,11 @@ The Stop & Reverse strategy is a variant of Zone Recovery that uses martingale p
 
 1. **Market Scanning**
    - Identifies volatile cryptocurrencies using dual timeframe filtering
-   - Primary filter: 12h movement > 2%
-   - Secondary confirmation: 5min movement > 1%
+   - Primary filter: Configurable timeframe (default: 720min/12h) with minimum % movement
+   - Secondary confirmation: Shorter timeframe (default: 5min) ensures coin is still actively moving
+   - Timeframes specified in minutes for precise control
    - Excludes innovation zone coins (high-risk new listings)
-   - Validates minimum order size requirements
+   - Validates minimum order size and volume requirements
 
 2. **Position Entry**
    - Initial position: 1% of account balance
@@ -80,19 +81,67 @@ Key parameters in `configs/config.json`:
 
 ```json
 {
+  "api": {
+    "testnet": false                    // Use testnet or live trading
+  },
+  
+  "account": {
+    "simulated_balance_usd": 1000.0,   // Simulated balance for testing
+    "use_live_balance": true,          // Use real account balance
+    "balance_compound": false,         // Compound profits into balance
+    "fixed_initial_order_usd": 5.0     // Fixed order size (if not using %)
+  },
+  
+  "scanner_settings": {
+    "min_volume_usd": 1000000,         // Minimum 24h volume (liquidity filter)
+    "volatility_lookback_candles": 10, // Candles to analyze for volatility
+    "interval": "5m",                  // Candle interval for volatility check
+    "top_k_candidates": 20,            // Top volatile coins to analyze
+    "timeframe_1_minutes": 720,        // Primary timeframe (720min = 12h)
+    "timeframe_1_change_pct": 2.0,     // Min % change for primary timeframe
+    "timeframe_2_minutes": 5,          // Secondary timeframe (5min)
+    "timeframe_2_change_pct": 1.5      // Min % change to confirm movement
+  },
+  
   "strategy": {
-    "initial_entry_pct": 1.0,           // First position size (% of balance)
-    "martingale_multiplier": 2.1,       // Size increase per flip
-    "max_flips": 5,                     // Maximum flips before exit
-    "flip_threshold_pct": 1.0,          // Price move to trigger flip
-    "leverage": 10,                     // Position leverage
-    "exit_use_trailing": true,          // Trailing vs static TP
-    "exit_trailing": {
-      "activation_pct": 1.0,            // Profit to activate trailing
-      "callback_pct": 0.5               // Retrace to exit
-    }
+    "initial_entry_pct": 1.0,          // First position size (% of balance)
+    "max_flips": 5,                    // Maximum flips before exit
+    "leverage": 10,                    // Position leverage
+    "martingale_multiplier": 2.1,      // Size increase per flip (next = prev × 2.1)
+    "range_pct": 1.0,                  // Price range % to trigger flip
+    "trailing_retracement_pct": 0.5,   // Retrace % from peak to exit
+    "market_orders_cycle_start": true, // Use market orders at cycle start
+    "exit_use_trailing": false         // Use trailing TP (true) or static (false)
   }
 }
+```
+
+### Timeframe Configuration Examples
+
+The scanner uses integer minutes for precise timeframe control:
+
+**Conservative (Default):**
+```json
+"timeframe_1_minutes": 720,   // 12 hours
+"timeframe_2_minutes": 5      // 5 minutes
+```
+
+**Aggressive Scalping:**
+```json
+"timeframe_1_minutes": 60,    // 1 hour
+"timeframe_2_minutes": 1      // 1 minute
+```
+
+**Day Trading:**
+```json
+"timeframe_1_minutes": 240,   // 4 hours
+"timeframe_2_minutes": 15     // 15 minutes
+```
+
+**Swing Trading:**
+```json
+"timeframe_1_minutes": 1440,  // 24 hours (1 day)
+"timeframe_2_minutes": 60     // 1 hour
 ```
 
 ## Risk Warning
@@ -107,14 +156,23 @@ Key parameters in `configs/config.json`:
 
 **Only use with capital you can afford to lose. Backtest thoroughly before live trading.**
 
+
 ## Setup
 
 1. Clone repository
-2. Install dependencies: `pip install -r requirements.txt`
-3. Copy `api-keys.json.example` to `api-keys.json`
-4. Add your Bybit API credentials
-5. Configure strategy parameters in `configs/config.json`
-6. Run: `python src/main.py`
+2. Create a virtual environment:
+   ```bash
+   python -m venv venv
+   ```
+3. Activate the virtual environment:
+   - **Windows (PowerShell)**: `.\venv\Scripts\Activate.ps1`
+   - **Windows (CMD)**: `venv\Scripts\activate`
+   - **Linux/Mac**: `source venv/bin/activate`
+4. Install dependencies: `pip install -r requirements.txt`
+5. Copy `api-keys.json.example` to `api-keys.json`
+6. Add your Bybit API credentials
+7. Configure strategy parameters in `configs/config.json`
+8. Run: `python src/main.py`
 
 ## Architecture
 
@@ -126,4 +184,17 @@ Key parameters in `configs/config.json`:
 
 ## Status
 
-**In Development** - Core scanning and tracking logic complete. Order placement and live trading logic pending implementation.
+**Live Trading - Unstable** - Core functionality is operational including market scanning, position tracking, and order execution. However, the bot requires active supervision as it may exhibit unexpected behavior in certain market conditions. Thoroughly test with small positions and monitor closely during operation.
+
+## Disclaimer
+
+**USE AT YOUR OWN RISK**
+
+This software is provided for educational and research purposes only. The authors and contributors are not responsible for any financial losses incurred through the use of this trading bot. Cryptocurrency trading involves substantial risk of loss and is not suitable for every investor.
+
+- **No Investment Advice**: Nothing in this repository constitutes financial, investment, legal, or tax advice.
+- **No Warranty**: This software is provided "as is" without warranty of any kind, express or implied.
+- **No Liability**: By using this software, you accept full responsibility for any trading decisions and their outcomes.
+- **Understand the Risks**: Ensure you fully understand the strategy, risks, and mechanics before deploying real capital.
+
+Always conduct thorough testing, risk assessment, and due diligence before live trading.
