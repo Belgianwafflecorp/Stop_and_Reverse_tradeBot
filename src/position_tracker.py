@@ -283,3 +283,54 @@ class PositionTracker:
         summary += "-----------------------------------\n"
         
         return summary
+    
+    def check_and_resume_positions(self):
+        """
+        Checks if there are any open positions on startup.
+        Returns the symbol of the first open position to resume, or None.
+        Displays position information and analysis.
+        
+        :return: Tuple of (symbol, should_resume) - symbol to resume or None, boolean if resumption recommended
+        """
+        print("\nChecking for existing open positions...")
+        
+        try:
+            open_positions = self.client.fetch_open_positions()
+            
+            if not open_positions:
+                print("No open positions found. Starting fresh.")
+                return None, False
+            
+            # Display all open positions
+            print(f"Found {len(open_positions)} open position(s):")
+            resume_symbol = None
+            
+            for pos in open_positions:
+                symbol = pos.get('symbol')
+                side = pos.get('side')  # 'long' or 'short'
+                contracts = pos.get('contracts', 0)
+                notional = pos.get('notional', 0)
+                entry_price = pos.get('entryPrice', 0)
+                unrealized_pnl = pos.get('unrealizedPnl', 0)
+                
+                print(f"  {symbol}: {side.upper()} | Size: {contracts} contracts (${notional:.2f}) | Entry: ${entry_price:.4f} | PnL: ${unrealized_pnl:.2f}")
+                
+                # Set the first open position as the one to resume
+                if not resume_symbol:
+                    resume_symbol = symbol
+                    print(f"\nResuming trading on existing position: {symbol}")
+                    
+                    # Get detailed position state
+                    position_state = self.analyze_position_state(symbol, lookback_hours=24)
+                    print(self.get_position_summary(symbol, lookback_hours=24))
+            
+            if len(open_positions) > 1:
+                print(f"\nWARNING: Multiple open positions detected. Bot will focus on: {resume_symbol}")
+                print("Consider closing other positions manually or updating bot logic to handle multiple positions.")
+            
+            return resume_symbol, True
+        
+        except Exception as e:
+            print(f"Error checking positions: {e}")
+            print("Continuing with fresh start...")
+            return None, False
