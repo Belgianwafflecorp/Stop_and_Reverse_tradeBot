@@ -709,7 +709,7 @@ class TradingBot:
             self.log.info(f"Order ID: {close_order.get('id', 'N/A')}")
             
             # Log the loss from this flip
-            self.pnl_calc.log_pnl_event("FLIP", symbol, old_pnl, old_side.upper())
+            # Removed broken PnL logging (self.pnl_calc)
             
             # Get current flip count from position tracker
             position_state = self.tracker.analyze_position_state(symbol, lookback_hours=1)
