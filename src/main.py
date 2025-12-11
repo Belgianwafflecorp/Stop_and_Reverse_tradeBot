@@ -1,5 +1,6 @@
 import json
 import sys
+from logger import BotLogger
 import os
 import time
 import asyncio
@@ -22,6 +23,7 @@ from src.json_handler import load_config, load_api_keys, get_config_path
 
 class TradingBot:
     def __init__(self, config_file=None):
+        self.log = BotLogger()
         # 1. Load Configs using centralized handler
         try:
             self.config_path = get_config_path(config_file)
@@ -57,7 +59,7 @@ class TradingBot:
             sys.exit(1)
 
         # 2. Initialize Exchange (The Connection)
-        print("Connecting to Bybit...")
+        self.log.info("Connecting to Bybit...")
         
         # Check if API keys are configured (not empty or placeholder values)
         bybit_keys = self.keys.get('bybit', {})
@@ -71,9 +73,9 @@ class TradingBot:
                 api_secret=api_secret,
                 testnet=self.config['api'].get('testnet', False)
             )
-            print(f"Authenticated with API key: {api_key[:6]}...{api_key[-4:]}")
+            self.log.info(f"Authenticated with API key: {api_key[:6]}...{api_key[-4:]}")
         else:
-            print("WARNING: No valid API keys found - running in public data mode only")
+            self.log.warning("No valid API keys found - running in public data mode only")
             self.bybit = BybitClient(testnet=self.config['api'].get('testnet', False))
 
         # 3. Initialize Components
@@ -91,7 +93,7 @@ class TradingBot:
         self.active_coin = None
         
         # Display account summary at startup
-        print(self.account.get_account_summary())
+        self.log.info(self.account.get_account_summary())
         
         # Check for existing open positions on startup
         resume_symbol, should_resume = self.tracker.check_and_resume_positions()
@@ -103,7 +105,7 @@ class TradingBot:
         
         # Skip scanning if we already have an active position
         if self.active_coin:
-            print(f"\nResuming monitoring: {self.active_coin}")
+            self.log.info(f"Resuming monitoring: {self.active_coin}")
             
             # Check if flip already triggered while bot was offline
             positions = self.bybit.fetch_open_positions()
@@ -119,7 +121,7 @@ class TradingBot:
             
             # If both positions exist, flip happened while offline
             if long_pos and short_pos:
-                print("WARNING: Flip detected during offline period - cleaning up now")
+                self.log.warning("Flip detected during offline period - cleaning up now")
                 self.handle_flip_cleanup(self.active_coin, long_pos, short_pos)
                 return
             
@@ -134,10 +136,10 @@ class TradingBot:
         # Check if we have ANY open positions on the exchange (prevents multiple pairs)
         all_positions = self.bybit.fetch_open_positions()
         if all_positions:
-            print(f"\nWARNING: Found {len(all_positions)} open position(s) - cannot open new pair")
+            self.log.warning(f"Found {len(all_positions)} open position(s) - cannot open new pair")
             for pos in all_positions:
-                print(f"   {pos['symbol']}: {pos['side'].upper()} | {abs(float(pos.get('contracts', 0))):.1f} contracts")
-            print("Waiting for existing positions to close...")
+                self.log.info(f"   {pos['symbol']}: {pos['side'].upper()} | {abs(float(pos.get('contracts', 0))):.1f} contracts")
+            self.log.info("Waiting for existing positions to close...")
             time.sleep(60)
             return
         
@@ -145,7 +147,7 @@ class TradingBot:
         coin_info = self.scanner.get_best_volatile_coin()
         
         if not coin_info:
-            print("No coin found. Waiting 60 seconds.")
+            self.log.info("No coin found. Waiting 60 seconds.")
             time.sleep(60)
             return
 
@@ -155,7 +157,7 @@ class TradingBot:
         # Validate symbol format (remove any whitespace)
         self.active_coin = self.active_coin.strip().replace('\n', '').replace('\r', '')
         
-        print(f"\nStarting cycle on {self.active_coin} - Entry Direction: {self.entry_direction}")
+        self.log.info(f"Starting cycle on {self.active_coin} - Entry Direction: {self.entry_direction}")
         
         # Check if we actually have an open position on the exchange
         positions = self.bybit.fetch_open_positions()
@@ -166,9 +168,9 @@ class TradingBot:
                 break
         
         if has_position:
-            print("Detected existing position on exchange. Resuming monitoring...")
+            self.log.info("Detected existing position on exchange. Resuming monitoring...")
         else:
-            print("No existing position. Placing initial entry...")
+            self.log.info("No existing position. Placing initial entry...")
             self.place_initial_entry(self.active_coin, self.entry_direction)
 
     def place_initial_entry(self, symbol, direction):
