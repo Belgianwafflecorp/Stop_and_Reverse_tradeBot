@@ -115,11 +115,7 @@ class MarketScanner:
         tf1_display = self._minutes_to_display(self.timeframe_1_minutes)
         tf2_display = self._minutes_to_display(self.timeframe_2_minutes)
         
-        print(f"Top {len(df)} most volatile coins (>{self.timeframe_1_threshold}% {tf1_display} movement):")
-        for idx, row in df.iterrows():
-            print(f"  {row['symbol']}: {row['change_pct']:.2f}% change, ${row['volume']/1e6:.1f}M volume")
-        
-        print(f"\nAnalyzing {tf2_display} movement for confirmation...")
+        print(f"Analyzing {len(df)} candidates for {tf2_display} movement confirmation...")
 
         # 4. Deep Dive: Check recent candles + timeframe_2 movement filter
         best_coin = None
@@ -238,12 +234,9 @@ class MarketScanner:
         if self.balance_compound:
             balance = self.account_manager.get_available_balance()
             initial_order_size = balance * (self.initial_entry_pct / 100.0)
-            size_desc = f"${initial_order_size:.2f} ({self.initial_entry_pct}%)"
         else:
             initial_order_size = self.fixed_initial_order
-            size_desc = f"${initial_order_size:.2f} (fixed)"
         
-        print(f"\nInitial order size: {size_desc}")
         print("Checking minimum order sizes...")
         
         valid_symbols = []

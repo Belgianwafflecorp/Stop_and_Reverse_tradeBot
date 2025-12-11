@@ -309,10 +309,12 @@ class TradingBot:
                 order_type='Limit',
                 limit_price=flip_trigger_price
             )
-            print(f"   {flip_order.get('id', 'N/A')}")
+            self.log.info(f"Order ID: {flip_order.get('id', 'N/A')}")
+            self.log.info(f"All orders placed successfully")
             
-            print(f"\n ALL ORDERS PLACED SUCCESSFULLY")
-            print(f"{'='*50}\n")
+            # Log initial flip count (0 flips)
+            max_flips = self.config['strategy']['max_flips']
+            self.log.flip_count_status(symbol, 0, max_flips)
             
         except Exception as e:
             print(f"\n ERROR PLACING ORDER: {e}")
@@ -707,14 +709,13 @@ class TradingBot:
             # Log the loss from this flip
             self.pnl_calc.log_pnl_event("FLIP", symbol, old_pnl, old_side.upper())
             
-            # Calculate next flip count (we just flipped, so increment)
-            position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
-            current_flip_count = position_state.get('flip_count', 0) + 1
+            # Get current flip count from position tracker
+            position_state = self.tracker.analyze_position_state(symbol, lookback_hours=1)
+            current_flip_count = position_state.get('flip_count', 0)
             max_flips = self.config['strategy']['max_flips']
             
             # Log flip count status
             self.log.flip_count_status(symbol, current_flip_count, max_flips)
-            print(f" Old position closed")
             
             # Now place TP and new Flip orders for the new position
             new_side = new_position['side']
