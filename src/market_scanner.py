@@ -60,7 +60,7 @@ class MarketScanner:
             market = market_info.get(symbol, {})
             info = market.get('info', {})
 
-            # --- NEW FILTER: STRICT STATUS CHECK ---
+            # --- ENHANCED FILTER: STRICT STATUS + REDUCE-ONLY PHASE ---
             # 1. Check CCXT standard 'active' flag
             if not market.get('active', True):
                 continue
@@ -69,9 +69,22 @@ class MarketScanner:
             # Valid Bybit V5 statuses: 'PreLaunch', 'Trading', 'Settling', 'Delivering', 'Closed'
             # We strictly only want 'Trading'. 'Delivering' usually means delisting.
             if info and 'status' in info:
-                if info['status'] != 'Trading':
-                    # Optional: Print skipped coins to debug
-                    # print(f"Skipping {symbol}: Status is {info['status']}")
+                status = str(info['status']).strip().lower()
+                if status != 'trading':
+                    print(f"Skipping {symbol}: Status is {info['status']}")
+                    continue
+
+            # 3. Bybit reduce-only/close-only phase filter
+            # If openAllowed is False, or reduceOnly/closeOnly is True, skip
+            if info:
+                if info.get('openAllowed') is False:
+                    print(f"Skipping {symbol}: openAllowed is False (reduce-only phase)")
+                    continue
+                if info.get('reduceOnly') is True:
+                    print(f"Skipping {symbol}: reduceOnly is True (reduce-only phase)")
+                    continue
+                if info.get('closeOnly') is True:
+                    print(f"Skipping {symbol}: closeOnly is True (reduce-only phase)")
                     continue
             # ---------------------------------------
             
