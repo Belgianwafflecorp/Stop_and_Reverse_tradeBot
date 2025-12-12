@@ -53,22 +53,35 @@ class MarketScanner:
 
         # 2. Filter loop (Client-side filtering)
         for symbol, data in tickers.items():
-            # Filter 1: Must be USDT perp (CCXT usually formats as BTC/USDT:USDT)
+            # Filter 1: Must be USDT perp
             if not symbol.endswith(':USDT'):
                 continue
             
-            # Filter 2: Check if innovation zone (Bybit-specific, skip for other exchanges)
             market = market_info.get(symbol, {})
             info = market.get('info', {})
+
+            # --- NEW FILTER: STRICT STATUS CHECK ---
+            # 1. Check CCXT standard 'active' flag
+            if not market.get('active', True):
+                continue
+
+            # 2. Check Bybit specific 'status'
+            # Valid Bybit V5 statuses: 'PreLaunch', 'Trading', 'Settling', 'Delivering', 'Closed'
+            # We strictly only want 'Trading'. 'Delivering' usually means delisting.
+            if info and 'status' in info:
+                if info['status'] != 'Trading':
+                    # Optional: Print skipped coins to debug
+                    # print(f"Skipping {symbol}: Status is {info['status']}")
+                    continue
+            # ---------------------------------------
             
-            # Only apply innovation filter if we have Bybit-specific data
+            # Filter 2: Check if innovation zone (Expanded)
             if info:
                 if info.get('innovatorSymbol') == '1' or \
-                   info.get('status') == 'PreLaunch' or \
                    'innovation' in str(info.get('category', '')).lower():
-                    continue  # Skip innovation zone coins
+                    continue 
             
-            # Filter 3: Calculate 24h percentage change using CCXT standardized fields
+            # Filter 3: Calculate 24h percentage change
             percentage = data.get('percentage')
             
             if percentage is None:
@@ -81,10 +94,9 @@ class MarketScanner:
                 else:
                     continue  # Skip if we can't calculate percentage
             else:
-                # CCXT percentage is already in % format, just make it absolute
                 percentage = abs(percentage)
             
-            # Filter 4: Skip coins that don't move enough (configurable threshold)
+            # Filter 4: Skip coins that don't move enough
             if percentage < self.timeframe_1_threshold:
                 continue
             
