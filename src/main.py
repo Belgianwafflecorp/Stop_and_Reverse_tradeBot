@@ -708,15 +708,11 @@ class TradingBot:
             )
             self.log.info(f"Order ID: {close_order.get('id', 'N/A')}")
             
-            # Log the loss from this flip
-            # Removed broken PnL logging (self.pnl_calc)
-            
-            # Get current flip count from position tracker
-            position_state = self.tracker.analyze_position_state(symbol, lookback_hours=1)
-            current_flip_count = position_state.get('flip_count', 0)
+            # Get current flip count from position tracker and increment for this flip
+            position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
+            current_flip_count = position_state.get('flip_count', 0) + 1
             max_flips = self.config['strategy']['max_flips']
-            
-            # Log flip count status
+            # Log flip count status 
             self.log.flip_count_status(symbol, current_flip_count, max_flips)
             
             # Now place TP and new Flip orders for the new position
