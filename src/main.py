@@ -165,6 +165,39 @@ class TradingBot:
             self.log.info("No existing position. Placing initial entry...")
             self.place_initial_entry(self.active_coin, self.entry_direction)
 
+    def get_dynamic_range_and_price(self, symbol):
+        """
+        Calculates dynamic range based on config and current spread.
+        Returns (current_price, dynamic_range_pct)
+        """
+        base_range = self.config['strategy']['range_pct']
+        
+        try:
+            # Use fetch_ticker to get both price and spread in one call
+            ticker = self.bybit.exchange.fetch_ticker(symbol)
+            current_price = float(ticker.get('last', 0.0))
+            
+            # Calculate spread
+            ask = float(ticker.get('ask', 0.0))
+            bid = float(ticker.get('bid', 0.0))
+            spread_pct = 0.0
+            
+            if ask > 0 and bid > 0:
+                spread_pct = ((ask - bid) / ask) * 100
+                
+            # Add spread to base range
+            dynamic_range = base_range + spread_pct
+            
+            return current_price, dynamic_range
+            
+        except Exception as e:
+            # Fallback
+            try:
+                current_price = self.bybit.get_market_price(symbol)
+            except:
+                current_price = 0.0
+            return current_price, base_range
+
     def place_initial_entry(self, symbol, direction):
         """Places the initial entry order for a new cycle."""
         try:
@@ -176,8 +209,9 @@ class TradingBot:
                 self.active_coin = None
                 return
             
-            # Get current price
-            current_price = self.bybit.get_market_price(symbol)
+            # Get current price and dynamic range
+            current_price, range_pct = self.get_dynamic_range_and_price(symbol)
+            print(f"Dynamic Range: {range_pct:.4f}% (Base: {self.config['strategy']['range_pct']}% + Spread)")
             
             # Calculate contracts (quantity)
             # For USDT perpetuals: contracts = USD value / price
@@ -192,7 +226,6 @@ class TradingBot:
             position_side = 'long' if direction == 'LONG' else 'short'
             
             # Calculate TP and Flip trigger prices
-            range_pct = self.config['strategy']['range_pct']
             multiplier = self.config['strategy']['martingale_multiplier']
             
             if position_side == 'long':
@@ -322,11 +355,10 @@ class TradingBot:
         try:
             position_side = current_position['side']
             entry_price = float(current_position.get('entryPrice', 0))
-            current_price = self.bybit.get_market_price(symbol)
+            current_price, range_pct = self.get_dynamic_range_and_price(symbol)
             position_contracts = abs(float(current_position.get('contracts', 0)))
             
             # Calculate flip trigger price
-            range_pct = self.config['strategy']['range_pct']
             
             if position_side == 'long':
                 flip_trigger = entry_price * (1 - range_pct / 100)
@@ -459,10 +491,9 @@ class TradingBot:
                 position_side = current_position['side']
                 position_contracts = abs(float(current_position.get('contracts', 0)))
                 entry_price = float(current_position.get('entryPrice', 0))
-                current_price = self.bybit.get_market_price(symbol)
+                current_price, range_pct = self.get_dynamic_range_and_price(symbol)
                 
                 # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
-                range_pct = self.config['strategy']['range_pct']
                 
                 if position_side == 'long':
                     # Long position - flip trigger is BELOW entry (price falling)
@@ -603,10 +634,9 @@ class TradingBot:
                 position_side = current_position['side']
                 position_contracts = abs(float(current_position.get('contracts', 0)))
                 entry_price = float(current_position.get('entryPrice', 0))
-                current_price = self.bybit.get_market_price(symbol)
+                current_price, range_pct = self.get_dynamic_range_and_price(symbol)
                 
                 # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
-                range_pct = self.config['strategy']['range_pct']
                 
                 if position_side == 'long':
                     flip_trigger = entry_price * (1 - range_pct / 100)
@@ -702,7 +732,7 @@ class TradingBot:
             
             old_side = old_position['side']
             old_contracts = abs(float(old_position.get('contracts', 0)))
-            current_price = self.bybit.get_market_price(symbol)
+            current_price, range_pct = self.get_dynamic_range_and_price(symbol)
             
             print(f"\n{'='*50}")
             print(f"FLIP CLEANUP - Closing old {old_side.upper()} position")
@@ -746,7 +776,7 @@ class TradingBot:
             new_entry = float(new_position.get('entryPrice', 0))
             
             # Calculate TP and Flip prices for new position
-            range_pct = self.config['strategy']['range_pct']
+            print(f"Dynamic Range: {range_pct:.4f}% (Base: {self.config['strategy']['range_pct']}% + Spread)")
             multiplier = self.config['strategy']['martingale_multiplier']
             
             if new_side == 'long':
