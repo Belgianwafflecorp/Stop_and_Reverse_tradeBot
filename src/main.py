@@ -427,6 +427,16 @@ class TradingBot:
                 if not long_position and not short_position:
                     print("Cycle complete - Position closed")
                     
+                    # Calculate and log final PnL
+                    try:
+                        # Small delay to ensure fills are available via REST
+                        await asyncio.sleep(1)
+                        final_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
+                        final_pnl = final_state.get('realized_pnl', 0.0)
+                        self.log.info(f"Cycle Final PnL: ${final_pnl:.2f}")
+                    except Exception as e:
+                        print(f"Error calculating final PnL: {e}")
+                    
                     # Cancel any remaining orders before clearing active coin
                     try:
                         open_orders = self.bybit.fetch_open_orders(symbol)
@@ -560,6 +570,16 @@ class TradingBot:
                 
                 if not long_position and not short_position:
                     print("Cycle complete - Position closed")
+                    
+                    # Calculate and log final PnL
+                    try:
+                        # Small delay to ensure fills are available via REST
+                        await asyncio.sleep(1)
+                        final_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
+                        final_pnl = final_state.get('realized_pnl', 0.0)
+                        self.log.info(f"Cycle Final PnL: ${final_pnl:.2f}")
+                    except Exception as e:
+                        print(f"Error calculating final PnL: {e}")
                     
                     # Cancel any remaining orders
                     try:
@@ -708,12 +728,17 @@ class TradingBot:
             )
             self.log.info(f"Order ID: {close_order.get('id', 'N/A')}")
             
+            # Wait briefly for fill to be indexed
+            time.sleep(1)
+            
             # Get current flip count from position tracker
             position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
             current_flip_count = position_state.get('flip_count', 0)
+            current_pnl = position_state.get('realized_pnl', 0.0)
             max_flips = self.config['strategy']['max_flips']
             # Log flip count status 
             self.log.flip_count_status(symbol, current_flip_count, max_flips)
+            self.log.info(f"Realized PnL (Current Cycle): ${current_pnl:.2f}")
             
             # Now place TP and new Flip orders for the new position
             new_side = new_position['side']
