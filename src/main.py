@@ -708,9 +708,9 @@ class TradingBot:
             )
             self.log.info(f"Order ID: {close_order.get('id', 'N/A')}")
             
-            # Get current flip count from position tracker and increment for this flip
+            # Get current flip count from position tracker
             position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
-            current_flip_count = position_state.get('flip_count', 0) + 1
+            current_flip_count = position_state.get('flip_count', 0)
             max_flips = self.config['strategy']['max_flips']
             # Log flip count status 
             self.log.flip_count_status(symbol, current_flip_count, max_flips)

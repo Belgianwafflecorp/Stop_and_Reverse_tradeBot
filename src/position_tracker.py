@@ -150,11 +150,6 @@ class PositionTracker:
                     # Mark next fill as potential new cycle start
                     if i + 1 < len(fills):
                         cycle_boundaries.append(i + 1)
-                # Position flipped sides (also indicates closure + reopening)
-                elif (prev_position > 0 and running_position < 0) or \
-                     (prev_position < 0 and running_position > 0):
-                    # This fill itself starts the new cycle
-                    cycle_boundaries.append(i)
         
         # Get fills from the last cycle boundary to end
         if cycle_boundaries:
