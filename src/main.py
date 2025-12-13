@@ -100,6 +100,11 @@ class TradingBot:
         if should_resume:
             self.active_coin = resume_symbol
     
+    async def interruptible_sleep(self, seconds):
+        """Sleeps for a given duration in 1s chunks to be more responsive to interrupts."""
+        for _ in range(int(seconds)):
+            await asyncio.sleep(1)
+
     async def start_cycle(self):
         """Starts the scanning and trading process (async for instant interrupt)."""
         # Skip scanning if we already have an active position
@@ -133,13 +138,11 @@ class TradingBot:
             for pos in all_positions:
                 self.log.info(f"   {pos['symbol']}: {pos['side'].upper()} | {abs(float(pos.get('contracts', 0))):.1f} contracts")
             self.log.info("Waiting for existing positions to close...")
-            await asyncio.sleep(60)
             return
         # 1. Find the best coin
         coin_info = self.scanner.get_best_volatile_coin()
         if not coin_info:
-            self.log.info("No coin found. Waiting 60 seconds.")
-            await asyncio.sleep(60)
+            self.log.info("No coin found.")
             return
         self.active_coin = coin_info['symbol']
         self.entry_direction = coin_info['direction']
@@ -492,7 +495,7 @@ class TradingBot:
                     print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
                     
                     # Wait for fill then cleanup
-                    time.sleep(2)
+                    await asyncio.sleep(2)
                     positions = self.bybit.fetch_open_positions()
                     long_pos = None
                     short_pos = None
@@ -519,9 +522,9 @@ class TradingBot:
             traceback.print_exc()
             # Fall back to polling if WebSocket fails
             print(" Falling back to REST API polling...")
-            self.manage_active_position_polling(symbol)
+            await self.manage_active_position_polling(symbol)
     
-    def manage_active_position_polling(self, symbol):
+    async def manage_active_position_polling(self, symbol):
         """Fallback polling method if WebSocket fails."""
         print(f" Polling mode for {symbol}")
         
@@ -618,7 +621,7 @@ class TradingBot:
                     print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
                     
                     # Wait for fill then cleanup
-                    time.sleep(2)
+                    await asyncio.sleep(2)
                     positions = self.bybit.fetch_open_positions()
                     long_pos = None
                     short_pos = None
@@ -639,13 +642,13 @@ class TradingBot:
                 
                 # No status printing - only important events logged
                 
-                time.sleep(10)  # Poll every 10 seconds
+                await self.interruptible_sleep(10)  # Poll every 10 seconds
                 
             except Exception as e:
                 print(f"Error managing position: {e}")
                 import traceback
                 traceback.print_exc()
-                time.sleep(10)
+                await self.interruptible_sleep(10)
 
     def handle_flip_cleanup(self, symbol, long_position, short_position):
         """Handles cleanup when both long and short positions exist (flip just occurred)."""
@@ -801,26 +804,30 @@ class TradingBot:
         print("\n=== Trading Bot Started ===")
         print(" WebSocket mode enabled for instant updates")
         print("Press Ctrl+C to stop\n")
-        while True:
-            try:
-                # Start a new cycle (find coin and place entry)
-                await self.start_cycle()
-                # If we now have an active position, monitor it with WebSocket
-                if self.active_coin:
-                    await self.monitor_position_websocket(self.active_coin)
-                else:
-                    # No position - wait before next scan
-                    print("\nWaiting 60 seconds before next scan...")
-                    await asyncio.sleep(60)
-            except KeyboardInterrupt:
-                print("\n\n=== Bot stopped by user ===")
-                break
-            except Exception as e:
-                print(f"\nCRITICAL ERROR: {e}")
-                import traceback
-                traceback.print_exc()
-                print("Waiting 10 seconds before retry...")
-                await asyncio.sleep(10)
+        try:
+            while True:
+                try:
+                    # Start a new cycle (find coin and place entry)
+                    await self.start_cycle()
+                    # If we now have an active position, monitor it with WebSocket
+                    if self.active_coin:
+                        await self.monitor_position_websocket(self.active_coin)
+                    else:
+                        # No position - wait before next scan
+                        print("\nWaiting 60 seconds before next scan...")
+                        await self.interruptible_sleep(60)
+                except KeyboardInterrupt:
+                    print("\n\n=== Bot stopped by user ===")
+                    break
+                except Exception as e:
+                    print(f"\nCRITICAL ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print("Waiting 10 seconds before retry...")
+                    await asyncio.sleep(10)
+        finally:
+            print("Closing exchange connection...")
+            await self.bybit.close()
     
     def run(self):
         """Wrapper to run async event loop."""

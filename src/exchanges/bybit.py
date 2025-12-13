@@ -329,3 +329,7 @@ class BybitClient:
         
         print(f"Retrieved {len(final_trades)} fills for {symbol}")
         return final_trades
+
+    async def close(self):
+        """Closes the WebSocket connection."""
+        await self.exchange_ws.close()
