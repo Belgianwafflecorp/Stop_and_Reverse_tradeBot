@@ -100,39 +100,32 @@ class TradingBot:
         if should_resume:
             self.active_coin = resume_symbol
     
-    def start_cycle(self):
-        """Starts the scanning and trading process."""
-        
+    async def start_cycle(self):
+        """Starts the scanning and trading process (async for instant interrupt)."""
         # Skip scanning if we already have an active position
         if self.active_coin:
             self.log.info(f"Resuming monitoring: {self.active_coin}")
-            
             # Check if flip already triggered while bot was offline
             positions = self.bybit.fetch_open_positions()
             long_pos = None
             short_pos = None
-            
             for pos in positions:
                 if pos['symbol'] == self.active_coin:
                     if pos['side'] == 'long':
                         long_pos = pos
                     elif pos['side'] == 'short':
                         short_pos = pos
-            
             # If both positions exist, flip happened while offline
             if long_pos and short_pos:
                 self.log.warning("Flip detected during offline period - cleaning up now")
                 self.handle_flip_cleanup(self.active_coin, long_pos, short_pos)
                 return
-            
             # Check if we should manually trigger flip (price already past trigger level)
             current_position = long_pos or short_pos
             if current_position:
                 self.check_manual_flip_trigger(self.active_coin, current_position)
-            
             # Monitoring will be handled by run_async via WebSocket
             return
-        
         # Check if we have ANY open positions on the exchange (prevents multiple pairs)
         all_positions = self.bybit.fetch_open_positions()
         if all_positions:
@@ -140,25 +133,19 @@ class TradingBot:
             for pos in all_positions:
                 self.log.info(f"   {pos['symbol']}: {pos['side'].upper()} | {abs(float(pos.get('contracts', 0))):.1f} contracts")
             self.log.info("Waiting for existing positions to close...")
-            time.sleep(60)
+            await asyncio.sleep(60)
             return
-        
         # 1. Find the best coin
         coin_info = self.scanner.get_best_volatile_coin()
-        
         if not coin_info:
             self.log.info("No coin found. Waiting 60 seconds.")
-            time.sleep(60)
+            await asyncio.sleep(60)
             return
-
         self.active_coin = coin_info['symbol']
         self.entry_direction = coin_info['direction']
-        
         # Validate symbol format (remove any whitespace)
         self.active_coin = self.active_coin.strip().replace('\n', '').replace('\r', '')
-        
         self.log.info(f"Starting cycle on {self.active_coin} - Entry Direction: {self.entry_direction}")
-        
         # Check if we actually have an open position on the exchange
         positions = self.bybit.fetch_open_positions()
         has_position = False
@@ -166,7 +153,6 @@ class TradingBot:
             if pos['symbol'] == self.active_coin and abs(float(pos.get('contracts', 0))) > 0:
                 has_position = True
                 break
-        
         if has_position:
             self.log.info("Detected existing position on exchange. Resuming monitoring...")
         else:
@@ -815,12 +801,10 @@ class TradingBot:
         print("\n=== Trading Bot Started ===")
         print(" WebSocket mode enabled for instant updates")
         print("Press Ctrl+C to stop\n")
-        
         while True:
             try:
                 # Start a new cycle (find coin and place entry)
-                self.start_cycle()
-                
+                await self.start_cycle()
                 # If we now have an active position, monitor it with WebSocket
                 if self.active_coin:
                     await self.monitor_position_websocket(self.active_coin)
@@ -828,7 +812,6 @@ class TradingBot:
                     # No position - wait before next scan
                     print("\nWaiting 60 seconds before next scan...")
                     await asyncio.sleep(60)
-                    
             except KeyboardInterrupt:
                 print("\n\n=== Bot stopped by user ===")
                 break
