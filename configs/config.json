@@ -14,7 +14,7 @@
     "min_volume_usd": 1000000,
     "volatility_lookback_candles": 10,
     "interval": "5m",
-    "top_k_candidates": 20,
+    "top_k_candidates": 50,
     "timeframe_1_minutes": 720,
     "timeframe_1_change_pct": 2.0,
     "timeframe_2_minutes": 5,

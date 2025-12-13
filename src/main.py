@@ -133,6 +133,9 @@ class TradingBot:
             return
         # Check if we have ANY open positions on the exchange (prevents multiple pairs)
         all_positions = self.bybit.fetch_open_positions()
+        if all_positions is None:
+            self.log.warning("Could not verify open positions due to exchange error. Skipping cycle start.")
+            return
         if all_positions:
             self.log.warning(f"Found {len(all_positions)} open position(s) - cannot open new pair")
             for pos in all_positions:
@@ -247,11 +250,12 @@ class TradingBot:
             # Fetch actual fill price from position (market orders may have slippage)
             positions = self.bybit.fetch_open_positions()
             actual_entry_price = None
-            for pos in positions:
-                if pos['symbol'] == symbol and pos['side'] == position_side:
-                    actual_entry_price = float(pos.get('entryPrice', 0))
-                    actual_contracts = abs(float(pos.get('contracts', 0)))
-                    break
+            if positions:
+                for pos in positions:
+                    if pos['symbol'] == symbol and pos['side'] == position_side:
+                        actual_entry_price = float(pos.get('entryPrice', 0))
+                        actual_contracts = abs(float(pos.get('contracts', 0)))
+                        break
             
             # If we can't get actual entry, use estimated price
             if actual_entry_price is None or actual_entry_price == 0:
@@ -500,12 +504,13 @@ class TradingBot:
                     long_pos = None
                     short_pos = None
                     
-                    for pos in positions:
-                        if pos['symbol'] == symbol:
-                            if pos['side'] == 'long':
-                                long_pos = pos
-                            elif pos['side'] == 'short':
-                                short_pos = pos
+                    if positions:
+                        for pos in positions:
+                            if pos['symbol'] == symbol:
+                                if pos['side'] == 'long':
+                                    long_pos = pos
+                                elif pos['side'] == 'short':
+                                    short_pos = pos
                     
                     if long_pos and short_pos:
                         self.handle_flip_cleanup(symbol, long_pos, short_pos)
@@ -532,6 +537,11 @@ class TradingBot:
             try:
                 # Get current positions
                 positions = self.bybit.fetch_open_positions()
+                if positions is None:
+                    print(" Error fetching positions. Retrying...")
+                    await self.interruptible_sleep(5)
+                    continue
+                
                 long_position = None
                 short_position = None
                 
@@ -626,12 +636,13 @@ class TradingBot:
                     long_pos = None
                     short_pos = None
                     
-                    for pos in positions:
-                        if pos['symbol'] == symbol:
-                            if pos['side'] == 'long':
-                                long_pos = pos
-                            elif pos['side'] == 'short':
-                                short_pos = pos
+                    if positions:
+                        for pos in positions:
+                            if pos['symbol'] == symbol:
+                                if pos['side'] == 'long':
+                                    long_pos = pos
+                                elif pos['side'] == 'short':
+                                    short_pos = pos
                     
                     if long_pos and short_pos:
                         self.handle_flip_cleanup(symbol, long_pos, short_pos)

@@ -297,6 +297,10 @@ class PositionTracker:
         try:
             open_positions = self.client.fetch_open_positions()
             
+            if open_positions is None:
+                print("Error fetching positions. Cannot resume.")
+                return None, False
+            
             if not open_positions:
                 print("No open positions found. Starting fresh.")
                 return None, False

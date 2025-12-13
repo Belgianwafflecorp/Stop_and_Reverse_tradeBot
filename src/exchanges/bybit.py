@@ -17,7 +17,8 @@ class BybitClient:
             'enableRateLimit': True, 
             'options': {
                 'defaultType': 'swap',  # Force Derivatives/Perpetuals
-                'adjustForTimeDifference': True
+                'adjustForTimeDifference': True,
+                'recvWindow': 10000  # Increased to prevent timestamp errors
             }
         }
         
@@ -75,7 +76,7 @@ class BybitClient:
             return open_positions
         except Exception as e:
             print(f"Error fetching open positions: {e}")
-            return []
+            return None
     
     async def watch_positions(self, symbol=None):
         """
@@ -96,6 +97,9 @@ class BybitClient:
                 current_time = time.time()
                 if current_time - last_position_check >= 1.5:
                     positions = self.fetch_open_positions()
+                    
+                    if positions is None:
+                        continue
                     
                     # Filter to symbol
                     if symbol:
