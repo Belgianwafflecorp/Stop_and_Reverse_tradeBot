@@ -91,8 +91,9 @@ class MarketScanner:
             # Filter 2: Check if innovation zone (Expanded)
             if info:
                 if info.get('innovatorSymbol') == '1' or \
-                   'innovation' in str(info.get('category', '')).lower():
-                    continue 
+                   'innovation' in str(info.get('category', '')).lower() or \
+                   str(info.get('symbolType', '')).lower() == 'innovation':
+                    continue
             
             # Filter 3: Calculate 24h percentage change
             percentage = data.get('percentage')
