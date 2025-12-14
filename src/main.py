@@ -165,12 +165,12 @@ class TradingBot:
             self.log.info("No existing position. Placing initial entry...")
             self.place_initial_entry(self.active_coin, self.entry_direction)
 
-    def get_dynamic_range_and_price(self, symbol):
+    def get_dynamic_range_and_price(self, symbol, flip_count=0):
         """
         Calculates dynamic range based on config and current spread.
         Returns (current_price, dynamic_range_pct)
         """
-        base_range = self.config['strategy']['range_pct']
+        base_range = self.calculator.calculate_range(flip_count)
         
         try:
             # Use fetch_ticker to get both price and spread in one call
@@ -210,8 +210,10 @@ class TradingBot:
                 return
             
             # Get current price and dynamic range
-            current_price, range_pct = self.get_dynamic_range_and_price(symbol)
-            print(f"Dynamic Range: {range_pct:.4f}% (Base: {self.config['strategy']['range_pct']}% + Spread)")
+            current_price, range_pct = self.get_dynamic_range_and_price(symbol, flip_count=0)
+            base_range = self.calculator.calculate_range(0)
+            spread_pct = range_pct - base_range
+            print(f"Dynamic Range: {range_pct:.4f}% (Base: {base_range:.4f}% + Spread: {spread_pct:.4f}%)")
             
             # Calculate contracts (quantity)
             # For USDT perpetuals: contracts = USD value / price
@@ -355,7 +357,12 @@ class TradingBot:
         try:
             position_side = current_position['side']
             entry_price = float(current_position.get('entryPrice', 0))
-            current_price, range_pct = self.get_dynamic_range_and_price(symbol)
+            
+            # Get current flip count
+            state = self.tracker.analyze_position_state(symbol)
+            flip_count = state.get('flip_count', 0)
+            
+            current_price, range_pct = self.get_dynamic_range_and_price(symbol, flip_count)
             position_contracts = abs(float(current_position.get('contracts', 0)))
             
             # Calculate flip trigger price
@@ -433,6 +440,10 @@ class TradingBot:
         """Monitor position using WebSocket for instant updates."""
         print(f"WebSocket monitoring active for {symbol}")
         
+        # Initialize flip count
+        state = self.tracker.analyze_position_state(symbol)
+        current_flip_count = state.get('flip_count', 0)
+        
         try:
             last_status_print = 0  # Initialize to 0 to ensure first check happens after 60s
             
@@ -451,7 +462,7 @@ class TradingBot:
                 # INSTANT flip detection - both positions exist
                 if long_position and short_position:
                     print(" FLIP DETECTED (WebSocket) - Both positions open!")
-                    self.handle_flip_cleanup(symbol, long_position, short_position)
+                    current_flip_count = self.handle_flip_cleanup(symbol, long_position, short_position)
                     # After cleanup, continue monitoring the new position
                     continue
                 
@@ -491,7 +502,7 @@ class TradingBot:
                 position_side = current_position['side']
                 position_contracts = abs(float(current_position.get('contracts', 0)))
                 entry_price = float(current_position.get('entryPrice', 0))
-                current_price, range_pct = self.get_dynamic_range_and_price(symbol)
+                current_price, range_pct = self.get_dynamic_range_and_price(symbol, current_flip_count)
                 
                 # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
                 
@@ -554,7 +565,7 @@ class TradingBot:
                                     short_pos = pos
                     
                     if long_pos and short_pos:
-                        self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                        current_flip_count = self.handle_flip_cleanup(symbol, long_pos, short_pos)
                     else:
                         print("   WARNING: Expected both positions after flip")
                     
@@ -573,6 +584,10 @@ class TradingBot:
     async def manage_active_position_polling(self, symbol):
         """Fallback polling method if WebSocket fails."""
         print(f" Polling mode for {symbol}")
+        
+        # Initialize flip count
+        state = self.tracker.analyze_position_state(symbol)
+        current_flip_count = state.get('flip_count', 0)
         
         while self.active_coin:
             try:
@@ -596,7 +611,7 @@ class TradingBot:
                 # Determine current state
                 if long_position and short_position:
                     print("WARNING: Both long and short positions detected - flip occurred!")
-                    self.handle_flip_cleanup(symbol, long_position, short_position)
+                    current_flip_count = self.handle_flip_cleanup(symbol, long_position, short_position)
                     continue
                 
                 if not long_position and not short_position:
@@ -634,7 +649,7 @@ class TradingBot:
                 position_side = current_position['side']
                 position_contracts = abs(float(current_position.get('contracts', 0)))
                 entry_price = float(current_position.get('entryPrice', 0))
-                current_price, range_pct = self.get_dynamic_range_and_price(symbol)
+                current_price, range_pct = self.get_dynamic_range_and_price(symbol, current_flip_count)
                 
                 # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
                 
@@ -695,7 +710,7 @@ class TradingBot:
                                     short_pos = pos
                     
                     if long_pos and short_pos:
-                        self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                        current_flip_count = self.handle_flip_cleanup(symbol, long_pos, short_pos)
                     else:
                         print("   WARNING: Expected both positions after flip")
                     
@@ -732,7 +747,6 @@ class TradingBot:
             
             old_side = old_position['side']
             old_contracts = abs(float(old_position.get('contracts', 0)))
-            current_price, range_pct = self.get_dynamic_range_and_price(symbol)
             
             print(f"\n{'='*50}")
             print(f"FLIP CLEANUP - Closing old {old_side.upper()} position")
@@ -770,13 +784,23 @@ class TradingBot:
             self.log.flip_count_status(symbol, current_flip_count, max_flips)
             self.log.info(f"Realized PnL (Current Cycle): ${current_pnl:.2f}")
             
+            # Get dynamic range for the NEW flip count
+            current_price, range_pct = self.get_dynamic_range_and_price(symbol, current_flip_count)
+            
+            # Calculate breakdown for logging
+            base_range_expanded = self.calculator.calculate_range(current_flip_count)
+            spread_pct = range_pct - base_range_expanded
+            
             # Now place TP and new Flip orders for the new position
             new_side = new_position['side']
             new_contracts = abs(float(new_position.get('contracts', 0)))
             new_entry = float(new_position.get('entryPrice', 0))
             
             # Calculate TP and Flip prices for new position
-            print(f"Dynamic Range: {range_pct:.4f}% (Base: {self.config['strategy']['range_pct']}% + Spread)")
+            print(f"Dynamic Range: {range_pct:.4f}%")
+            print(f"   Base: {base_range_expanded:.4f}% (Config: {self.config['strategy']['range_pct']}% * {self.calculator.range_pct_increase_per_flip}^{current_flip_count})")
+            print(f"   Spread: {spread_pct:.4f}%")
+            
             multiplier = self.config['strategy']['martingale_multiplier']
             
             if new_side == 'long':
@@ -823,10 +847,13 @@ class TradingBot:
             
             print(f"{'='*50}\n")
             
+            return current_flip_count
+            
         except Exception as e:
             print(f" ERROR IN FLIP CLEANUP: {e}")
             import traceback
             traceback.print_exc()
+            return 0
 
     def exit_position(self, symbol, current_position, reason):
         """Exits the current position and ends the cycle."""

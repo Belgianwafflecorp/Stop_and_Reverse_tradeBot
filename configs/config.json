@@ -27,6 +27,7 @@
     "leverage": 10,
     "martingale_multiplier": 2.1,
     "range_pct": 1.0,
+    "range_pct_increase_per_flip": 1.2,
     "trailing_retracement_pct": 0.5,
     "market_orders_cycle_start": true,
     "exit_use_trailing": false

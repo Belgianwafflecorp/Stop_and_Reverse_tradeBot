@@ -6,6 +6,7 @@ class TradeCalculator:
         
         # Range configuration - used for both flips and TP
         self.range_pct = config['strategy']['range_pct']
+        self.range_pct_increase_per_flip = config['strategy'].get('range_pct_increase_per_flip', 1.0)
         
         # Exit mode configuration
         self.exit_use_trailing = config['strategy'].get('exit_use_trailing', True)
@@ -25,6 +26,16 @@ class TradeCalculator:
         exit_type = "TRAILING" if self.exit_use_trailing else "STATIC"
         print(f"Exit mode: {exit_type}")
         print(f"Range: {self.range_pct}% (flip trigger & TP activation)")
+        if self.range_pct_increase_per_flip != 1.0:
+            print(f"Range Multiplier: {self.range_pct_increase_per_flip}x per flip")
+
+    def calculate_range(self, flip_count=0):
+        """
+        Calculates the range percentage for a specific flip count.
+        """
+        if flip_count <= 0:
+            return self.range_pct
+        return self.range_pct * (self.range_pct_increase_per_flip ** flip_count)
 
     def calculate_next_position(self, current_flip_count, previous_size, realized_loss):
         """
@@ -129,4 +140,3 @@ class TradeCalculator:
             return f"Trailing TP: Activate at +{self.range_pct}%, callback {self.trailing_retracement_pct}%"
         else:
             return f"Static TP: +{self.range_pct}% target"
-
