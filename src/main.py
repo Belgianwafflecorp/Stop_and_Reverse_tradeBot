@@ -439,151 +439,160 @@ class TradingBot:
     async def monitor_position_websocket(self, symbol):
         """Monitor position using WebSocket for instant updates."""
         print(f"WebSocket monitoring active for {symbol}")
-        
-        # Initialize flip count
-        state = self.tracker.analyze_position_state(symbol)
-        current_flip_count = state.get('flip_count', 0)
-        
-        try:
-            last_status_print = 0  # Initialize to 0 to ensure first check happens after 60s
+
+        while True:
+            # Refresh state in case polling changed it or we are reconnecting
+            state = self.tracker.analyze_position_state(symbol)
+            current_flip_count = state.get('flip_count', 0)
             
-            async for positions in self.bybit.watch_positions(symbol):
-                # Parse positions for this symbol
-                long_position = None
-                short_position = None
+            try:
+                last_status_print = 0  # Initialize to 0 to ensure first check happens after 60s
                 
-                for pos in positions:
-                    if pos['symbol'] == symbol:
-                        if pos['side'] == 'long' and abs(float(pos.get('contracts', 0))) > 0:
-                            long_position = pos
-                        elif pos['side'] == 'short' and abs(float(pos.get('contracts', 0))) > 0:
-                            short_position = pos
-                
-                # INSTANT flip detection - both positions exist
-                if long_position and short_position:
-                    print(" FLIP DETECTED (WebSocket) - Both positions open!")
-                    current_flip_count = self.handle_flip_cleanup(symbol, long_position, short_position)
-                    # After cleanup, continue monitoring the new position
-                    continue
-                
-                # No positions - cycle complete
-                if not long_position and not short_position:
-                    print("Cycle complete - Position closed")
+                async for positions in self.bybit.watch_positions(symbol):
                     
-                    # Calculate and log final PnL
-                    try:
-                        # Small delay to ensure fills are available via REST
-                        await asyncio.sleep(1)
-                        final_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
-                        final_pnl = final_state.get('realized_pnl', 0.0)
-                        self.log.info(f"Cycle Final PnL: ${final_pnl:.2f}")
-                    except Exception as e:
-                        print(f"Error calculating final PnL: {e}")
+                    # Parse positions for this symbol
+                    long_position = None
+                    short_position = None
                     
-                    # Cancel any remaining orders before clearing active coin
-                    try:
-                        open_orders = self.bybit.fetch_open_orders(symbol)
-                        if open_orders:
-                            print(f"Cleaning up {len(open_orders)} remaining order(s)...")
+                    for pos in positions:
+                        if pos['symbol'] == symbol:
+                            if pos['side'] == 'long' and abs(float(pos.get('contracts', 0))) > 0:
+                                long_position = pos
+                            elif pos['side'] == 'short' and abs(float(pos.get('contracts', 0))) > 0:
+                                short_position = pos
+                    
+                    # INSTANT flip detection - both positions exist
+                    if long_position and short_position:
+                        print(" FLIP DETECTED (WebSocket) - Both positions open!")
+                        current_flip_count = self.handle_flip_cleanup(symbol, long_position, short_position)
+                        # After cleanup, continue monitoring the new position
+                        continue
+                    
+                    # No positions - cycle complete
+                    if not long_position and not short_position:
+                        print("Cycle complete - Position closed")
+                        
+                        # Calculate and log final PnL
+                        try:
+                            # Small delay to ensure fills are available via REST
+                            await asyncio.sleep(1)
+                            final_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
+                            final_pnl = final_state.get('realized_pnl', 0.0)
+                            self.log.info(f"Cycle Final PnL: ${final_pnl:.2f}")
+                        except Exception as e:
+                            print(f"Error calculating final PnL: {e}")
+                        
+                        # Cancel any remaining orders before clearing active coin
+                        try:
+                            open_orders = self.bybit.fetch_open_orders(symbol)
+                            if open_orders:
+                                print(f"Cleaning up {len(open_orders)} remaining order(s)...")
+                                for order in open_orders:
+                                    try:
+                                        self.bybit.cancel_order(order['id'], symbol)
+                                        print(f"  Cancelled: {order['id']}")
+                                    except Exception as e:
+                                        print(f"  Error cancelling {order['id']}: {e}")
+                        except Exception as e:
+                            print(f"Error cleaning up orders: {e}")
+                        
+                        self.active_coin = None
+                        return  # Exit function completely
+                    
+                    # One position - normal monitoring (silent unless flip or completion)
+                    current_position = long_position or short_position
+                    position_side = current_position['side']
+                    position_contracts = abs(float(current_position.get('contracts', 0)))
+                    entry_price = float(current_position.get('entryPrice', 0))
+                    current_price, range_pct = self.get_dynamic_range_and_price(symbol, current_flip_count)
+                    
+                    # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
+                    
+                    if position_side == 'long':
+                        # Long position - flip trigger is BELOW entry (price falling)
+                        flip_trigger = entry_price * (1 - range_pct / 100)
+                        flip_triggered = current_price <= flip_trigger
+                    else:
+                        # Short position - flip trigger is ABOVE entry (price rising)
+                        flip_trigger = entry_price * (1 + range_pct / 100)
+                        flip_triggered = current_price >= flip_trigger
+                    
+                    if flip_triggered:
+                        print(f" PRICE-BASED FLIP TRIGGER! Current: ${current_price:.6f}, Trigger: ${flip_trigger:.6f}")
+                        print(f"   Position at risk - executing immediate flip to prevent liquidation")
+                        
+                        # Cancel existing conditional orders
+                        try:
+                            open_orders = self.bybit.fetch_open_orders(symbol)
                             for order in open_orders:
                                 try:
                                     self.bybit.cancel_order(order['id'], symbol)
-                                    print(f"  Cancelled: {order['id']}")
+                                    print(f"   Cancelled: {order['id']}")
                                 except Exception as e:
-                                    print(f"  Error cancelling {order['id']}: {e}")
-                    except Exception as e:
-                        print(f"Error cleaning up orders: {e}")
+                                    print(f"   Cancel error: {e}")
+                        except Exception as e:
+                            print(f"   Error fetching orders: {e}")
+                        
+                        # Calculate flip details
+                        multiplier = self.config['strategy']['martingale_multiplier']
+                        position_size_usd = position_contracts * entry_price
+                        flip_size_usd = position_size_usd * multiplier
+                        flip_contracts = flip_size_usd / current_price
+                        
+                        flip_side = 'sell' if position_side == 'long' else 'buy'
+                        flip_position_side = 'short' if position_side == 'long' else 'long'
+                        
+                        # Execute flip at market price
+                        print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                        flip_order = self.bybit.create_market_order(
+                            symbol=symbol,
+                            side=flip_side,
+                            amount=flip_contracts,
+                            position_side=flip_position_side
+                        )
+                        print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                        
+                        # Wait for fill then cleanup
+                        await asyncio.sleep(2)
+                        positions = self.bybit.fetch_open_positions()
+                        long_pos = None
+                        short_pos = None
+                        
+                        if positions:
+                            for pos in positions:
+                                if pos['symbol'] == symbol:
+                                    if pos['side'] == 'long':
+                                        long_pos = pos
+                                    elif pos['side'] == 'short':
+                                        short_pos = pos
+                        
+                        if long_pos and short_pos:
+                            current_flip_count = self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                        else:
+                            print("   WARNING: Expected both positions after flip")
+                        
+                        continue
                     
-                    self.active_coin = None
-                    break
+                    # No status printing - only flip and cycle completion events are logged
+                        
+            except Exception as e:
+                print(f"WebSocket connection lost: {e}")
+                print("Polling via REST API while attempting to reconnect...")
                 
-                # One position - normal monitoring (silent unless flip or completion)
-                current_position = long_position or short_position
-                position_side = current_position['side']
-                position_contracts = abs(float(current_position.get('contracts', 0)))
-                entry_price = float(current_position.get('entryPrice', 0))
-                current_price, range_pct = self.get_dynamic_range_and_price(symbol, current_flip_count)
+                # Run one polling iteration to ensure safety
+                await self.manage_active_position_polling(symbol, run_once=True)
                 
-                # CRITICAL: Check if price has moved beyond flip trigger (safety against gaps/slippage)
-                
-                if position_side == 'long':
-                    # Long position - flip trigger is BELOW entry (price falling)
-                    flip_trigger = entry_price * (1 - range_pct / 100)
-                    flip_triggered = current_price <= flip_trigger
-                else:
-                    # Short position - flip trigger is ABOVE entry (price rising)
-                    flip_trigger = entry_price * (1 + range_pct / 100)
-                    flip_triggered = current_price >= flip_trigger
-                
-                if flip_triggered:
-                    print(f" PRICE-BASED FLIP TRIGGER! Current: ${current_price:.6f}, Trigger: ${flip_trigger:.6f}")
-                    print(f"   Position at risk - executing immediate flip to prevent liquidation")
-                    
-                    # Cancel existing conditional orders
-                    try:
-                        open_orders = self.bybit.fetch_open_orders(symbol)
-                        for order in open_orders:
-                            try:
-                                self.bybit.cancel_order(order['id'], symbol)
-                                print(f"   Cancelled: {order['id']}")
-                            except Exception as e:
-                                print(f"   Cancel error: {e}")
-                    except Exception as e:
-                        print(f"   Error fetching orders: {e}")
-                    
-                    # Calculate flip details
-                    multiplier = self.config['strategy']['martingale_multiplier']
-                    position_size_usd = position_contracts * entry_price
-                    flip_size_usd = position_size_usd * multiplier
-                    flip_contracts = flip_size_usd / current_price
-                    
-                    flip_side = 'sell' if position_side == 'long' else 'buy'
-                    flip_position_side = 'short' if position_side == 'long' else 'long'
-                    
-                    # Execute flip at market price
-                    print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
-                    flip_order = self.bybit.create_market_order(
-                        symbol=symbol,
-                        side=flip_side,
-                        amount=flip_contracts,
-                        position_side=flip_position_side
-                    )
-                    print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
-                    
-                    # Wait for fill then cleanup
-                    await asyncio.sleep(2)
-                    positions = self.bybit.fetch_open_positions()
-                    long_pos = None
-                    short_pos = None
-                    
-                    if positions:
-                        for pos in positions:
-                            if pos['symbol'] == symbol:
-                                if pos['side'] == 'long':
-                                    long_pos = pos
-                                elif pos['side'] == 'short':
-                                    short_pos = pos
-                    
-                    if long_pos and short_pos:
-                        current_flip_count = self.handle_flip_cleanup(symbol, long_pos, short_pos)
-                    else:
-                        print("   WARNING: Expected both positions after flip")
-                    
-                    continue
-                
-                # No status printing - only flip and cycle completion events are logged
-                    
-        except Exception as e:
-            print(f"WebSocket monitoring error: {e}")
-            import traceback
-            traceback.print_exc()
-            # Fall back to polling if WebSocket fails
-            print(" Falling back to REST API polling...")
-            await self.manage_active_position_polling(symbol)
+                # If active_coin is None, cycle finished during polling
+                if not self.active_coin:
+                    return
+
+                # Small delay before reconnecting to avoid tight loop spam if network is down
+                await asyncio.sleep(2)
     
-    async def manage_active_position_polling(self, symbol):
+    async def manage_active_position_polling(self, symbol, run_once=False):
         """Fallback polling method if WebSocket fails."""
-        print(f" Polling mode for {symbol}")
+        if not run_once:
+            print(f" Polling mode for {symbol}")
         
         # Initialize flip count
         state = self.tracker.analyze_position_state(symbol)
@@ -718,12 +727,17 @@ class TradingBot:
                 
                 # No status printing - only important events logged
                 
+                if run_once:
+                    return
+                
                 await self.interruptible_sleep(10)  # Poll every 10 seconds
                 
             except Exception as e:
                 print(f"Error managing position: {e}")
                 import traceback
                 traceback.print_exc()
+                if run_once:
+                    return
                 await self.interruptible_sleep(10)
 
     def handle_flip_cleanup(self, symbol, long_position, short_position):
@@ -799,6 +813,170 @@ class TradingBot:
             # Calculate TP and Flip prices for new position
             print(f"Dynamic Range: {range_pct:.4f}%")
             print(f"   Base: {base_range_expanded:.4f}% (Config: {self.config['strategy']['range_pct']}% * {self.calculator.range_pct_increase_per_flip}^{current_flip_count})")
+            print(f"   Spread: {spread_pct:.4f}%")
+            
+            multiplier = self.config['strategy']['martingale_multiplier']
+            
+            if new_side == 'long':
+                tp_price = new_entry * (1 + range_pct / 100)
+                flip_trigger = new_entry * (1 - range_pct / 100)
+                tp_side = 'sell'
+                flip_side = 'sell'
+                flip_position_side = 'short'
+            else:
+                tp_price = new_entry * (1 - range_pct / 100)
+                flip_trigger = new_entry * (1 + range_pct / 100)
+                tp_side = 'buy'
+                flip_side = 'buy'
+                flip_position_side = 'long'
+            
+            # Calculate next flip size
+            flip_size_usd = (new_contracts * new_entry) * multiplier
+            flip_contracts = flip_size_usd / flip_trigger
+            
+            print(f"\nPlacing new TP + Flip for {new_side.upper()} position:")
+            
+            # Place TP order
+            tp_order = self.bybit.create_limit_order(
+                symbol=symbol,
+                side=tp_side,
+                amount=new_contracts,
+                price=tp_price,
+                position_side=new_side,
+                params={'reduceOnly': True}
+            )
+            print(f"  TP at ${tp_price:.6f}: ")
+            
+            # Place Flip order (conditional - only triggers at price level)
+            flip_order = self.bybit.create_conditional_order(
+                symbol=symbol,
+                side=flip_side,
+                amount=flip_contracts,
+                trigger_price=flip_trigger,
+                position_side=flip_position_side,
+                order_type='Limit',
+                limit_price=flip_trigger
+            )
+            print(f"  Flip at ${flip_trigger:.6f} ({flip_contracts:.4f} contracts): OK")
+            
+            print(f"{'='*50}\n")
+            
+            return current_flip_count
+            
+        except Exception as e:
+            print(f" ERROR IN FLIP CLEANUP: {e}")
+            import traceback
+            traceback.print_exc()
+            return 0
+
+    def exit_position(self, symbol, current_position, reason):
+        """Exits the current position and ends the cycle."""
+        try:
+            current_side = current_position['side']
+            current_contracts = abs(float(current_position.get('contracts', 0)))
+            current_price = self.bybit.get_market_price(symbol)
+            
+            # Determine closing side
+            close_side = 'sell' if current_side == 'long' else 'buy'
+            
+            print(f"\n{'='*50}")
+            print(f"EXITING POSITION")
+            print(f"{'='*50}")
+            print(f"Reason: {reason}")
+            print(f"Closing: {current_side.upper()} {current_contracts:.4f} contracts")
+            print(f"Order: {close_side.upper()} {current_contracts:.4f} contracts at ${current_price:.6f}")
+            
+            # Place exit order
+            order = self.bybit.create_market_order(
+                symbol=symbol,
+                side=close_side,
+                amount=current_contracts,
+                position_side=current_side
+            )
+            
+            print(f"\n EXIT ORDER PLACED")
+            print(f"Order ID: {order.get('id', 'N/A')}")
+            print(f"Cycle ended for {symbol}")
+            print(f"{'='*50}\n")
+            
+            # Clear active coin to start fresh
+            self.active_coin = None
+            
+        except Exception as e:
+            print(f"\n❌ ERROR EXITING POSITION: {e}")
+            print(f"{'='*50}\n")
+
+    async def run_async(self):
+        """Main async run loop with WebSocket support."""
+        print("\n=== Trading Bot Started ===")
+        print(" WebSocket mode enabled for instant updates")
+        print("Press Ctrl+C to stop\n")
+        try:
+            while True:
+                try:
+                    # Start a new cycle (find coin and place entry)
+                    await self.start_cycle()
+                    # If we now have an active position, monitor it with WebSocket
+                    if self.active_coin:
+                        await self.monitor_position_websocket(self.active_coin)
+                    else:
+                        # No position - wait before next scan
+                        print("\nWaiting 60 seconds before next scan...")
+                        await self.interruptible_sleep(60)
+                except KeyboardInterrupt:
+                    print("\n\n=== Bot stopped by user ===")
+                    break
+                except Exception as e:
+                    print(f"\nCRITICAL ERROR: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    print("Waiting 10 seconds before retry...")
+                    await asyncio.sleep(10)
+        finally:
+            print("Closing exchange connection...")
+            await self.bybit.close()
+    
+    def run(self):
+        """Wrapper to run async event loop."""
+        try:
+            asyncio.run(self.run_async())
+        except KeyboardInterrupt:
+            print("\n\n=== Bot stopped ===")
+
+if __name__ == "__main__":
+    # Check for command-line argument for config file
+    config_file = None
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    
+    bot = TradingBot(config_file)
+    bot.run()apper to run async event loop."""
+        try:
+            asyncio.run(self.run_async())
+        except KeyboardInterrupt:
+            print("\n\n=== Bot stopped ===")
+
+if __name__ == "__main__":
+    # Check for command-line argument for config file
+    config_file = None
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    
+    bot = TradingBot(config_file)
+    bot.run()apper to run async event loop."""
+        try:
+            asyncio.run(self.run_async())
+        except KeyboardInterrupt:
+            print("\n\n=== Bot stopped ===")
+
+if __name__ == "__main__":
+    # Check for command-line argument for config file
+    config_file = None
+    if len(sys.argv) > 1:
+        config_file = sys.argv[1]
+    
+    bot = TradingBot(config_file)
+    bot.run()rint(f"   Base: {base_range_expanded:.4f}% (Config: {self.config['strategy']['range_pct']}% * {self.calculator.range_pct_increase_per_flip}^{current_flip_count})")
             print(f"   Spread: {spread_pct:.4f}%")
             
             multiplier = self.config['strategy']['martingale_multiplier']
