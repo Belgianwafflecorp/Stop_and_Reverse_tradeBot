@@ -356,7 +356,7 @@ class TradingBot:
             self.log.info(f"All orders placed successfully")
             
             # Log initial flip count (0 flips)
-            self.log.flip_count_status(symbol, 0, max_flips)
+            self.log.flip_count_status(symbol, 0, self.calculator.max_flips)
             
         except Exception as e:
             print(f"\n ERROR PLACING ORDER: {e}")
@@ -566,7 +566,7 @@ class TradingBot:
                             )
                             print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                         else:
-                    flip_contracts = next_flip_size_usd / current_price
+                            flip_contracts = next_flip_size_usd / current_price
                             # Execute flip at market price
                             print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
                             flip_order = self.bybit.create_market_order(
@@ -1000,125 +1000,7 @@ if __name__ == "__main__":
         config_file = sys.argv[1]
     
     bot = TradingBot(config_file)
-    bot.run()apper to run async event loop."""
-        try:
-            asyncio.run(self.run_async())
-        except KeyboardInterrupt:
-            print("\n\n=== Bot stopped ===")
-
-if __name__ == "__main__":
-    # Check for command-line argument for config file
-    config_file = None
-    if len(sys.argv) > 1:
-        config_file = sys.argv[1]
-    
-    bot = TradingBot(config_file)
-    bot.run()apper to run async event loop."""
-        try:
-            asyncio.run(self.run_async())
-        except KeyboardInterrupt:
-            print("\n\n=== Bot stopped ===")
-
-if __name__ == "__main__":
-    # Check for command-line argument for config file
-    config_file = None
-    if len(sys.argv) > 1:
-        config_file = sys.argv[1]
-    
-    bot = TradingBot(config_file)
-    bot.run()rint(f"   Base: {base_range_expanded:.4f}% (Config: {self.config['strategy']['range_pct']}% * {self.calculator.range_pct_increase_per_flip}^{current_flip_count})")
-            print(f"   Spread: {spread_pct:.4f}%")
-            
-            multiplier = self.config['strategy']['martingale_multiplier']
-            
-            if new_side == 'long':
-                tp_price = new_entry * (1 + range_pct / 100)
-                flip_trigger = new_entry * (1 - range_pct / 100)
-                tp_side = 'sell'
-                flip_side = 'sell'
-                flip_position_side = 'short'
-            else:
-                tp_price = new_entry * (1 - range_pct / 100)
-                flip_trigger = new_entry * (1 + range_pct / 100)
-                tp_side = 'buy'
-                flip_side = 'buy'
-                flip_position_side = 'long'
-            
-            # Calculate next flip size
-            flip_size_usd = (new_contracts * new_entry) * multiplier
-            flip_contracts = flip_size_usd / flip_trigger
-            
-            print(f"\nPlacing new TP + Flip for {new_side.upper()} position:")
-            
-            # Place TP order
-            tp_order = self.bybit.create_limit_order(
-                symbol=symbol,
-                side=tp_side,
-                amount=new_contracts,
-                price=tp_price,
-                position_side=new_side,
-                params={'reduceOnly': True}
-            )
-            print(f"  TP at ${tp_price:.6f}: ")
-            
-            # Place Flip order (conditional - only triggers at price level)
-            flip_order = self.bybit.create_conditional_order(
-                symbol=symbol,
-                side=flip_side,
-                amount=flip_contracts,
-                trigger_price=flip_trigger,
-                position_side=flip_position_side,
-                order_type='Limit',
-                limit_price=flip_trigger
-            )
-            print(f"  Flip at ${flip_trigger:.6f} ({flip_contracts:.4f} contracts): OK")
-            
-            print(f"{'='*50}\n")
-            
-            return current_flip_count
-            
-        except Exception as e:
-            print(f" ERROR IN FLIP CLEANUP: {e}")
-            import traceback
-            traceback.print_exc()
-            return 0
-
-    def exit_position(self, symbol, current_position, reason):
-        """Exits the current position and ends the cycle."""
-        try:
-            current_side = current_position['side']
-            current_contracts = abs(float(current_position.get('contracts', 0)))
-            current_price = self.bybit.get_market_price(symbol)
-            
-            # Determine closing side
-            close_side = 'sell' if current_side == 'long' else 'buy'
-            
-            print(f"\n{'='*50}")
-            print(f"EXITING POSITION")
-            print(f"{'='*50}")
-            print(f"Reason: {reason}")
-            print(f"Closing: {current_side.upper()} {current_contracts:.4f} contracts")
-            print(f"Order: {close_side.upper()} {current_contracts:.4f} contracts at ${current_price:.6f}")
-            
-            # Place exit order
-            order = self.bybit.create_market_order(
-                symbol=symbol,
-                side=close_side,
-                amount=current_contracts,
-                position_side=current_side
-            )
-            
-            print(f"\n EXIT ORDER PLACED")
-            print(f"Order ID: {order.get('id', 'N/A')}")
-            print(f"Cycle ended for {symbol}")
-            print(f"{'='*50}\n")
-            
-            # Clear active coin to start fresh
-            self.active_coin = None
-            
-        except Exception as e:
-            print(f"\n❌ ERROR EXITING POSITION: {e}")
-            print(f"{'='*50}\n")
+    bot.run()
 
     async def run_async(self):
         """Main async run loop with WebSocket support."""
