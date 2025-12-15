@@ -311,9 +311,8 @@ class TradingBot:
                 take_profit_price = actual_entry_price * (1 - range_pct / 100)
                 flip_trigger_price = actual_entry_price * (1 + range_pct / 100)
             
-            # Recalculate flip size based on actual entry
-            flip_size_usd = (actual_contracts * actual_entry_price) * multiplier
-            flip_contracts = flip_size_usd / flip_trigger_price
+            # Calculate next position size (Flip vs Stop Loss decision)
+            next_flip_size_usd = self.calculator.calculate_next_position(0, actual_contracts * actual_entry_price, 0)
             
             # 2. Place TP order (reduces position at profit target)
             tp_side = 'sell' if position_side == 'long' else 'buy'
@@ -328,22 +327,35 @@ class TradingBot:
             )
             print(f"   {tp_order.get('id', 'N/A')}")
             
-            # 3. Place flip order (conditional order - only triggers when price hits level)
-            print(f"\n3. Flip Order: CONDITIONAL {flip_side.upper()} at ${flip_trigger_price:.6f} (based on actual entry)")
-            flip_order = self.bybit.create_conditional_order(
-                symbol=symbol,
-                side=flip_side,
-                amount=flip_contracts,
-                trigger_price=flip_trigger_price,
-                position_side=flip_position_side,
-                order_type='Limit',
-                limit_price=flip_trigger_price
-            )
+            # 3. Place flip order or Stop Loss based on calculator decision
+            if next_flip_size_usd == 0:
+                print(f"\n3. Stop Loss: CONDITIONAL {flip_side.upper()} at ${flip_trigger_price:.6f}")
+                flip_order = self.bybit.create_conditional_order(
+                    symbol=symbol,
+                    side=flip_side,
+                    amount=actual_contracts,
+                    trigger_price=flip_trigger_price,
+                    position_side=position_side, # Close current position
+                    order_type='Market',
+                    params={'reduceOnly': True, 'triggerBy': 'LastPrice'}
+                )
+            else:
+                flip_contracts = next_flip_size_usd / flip_trigger_price
+                print(f"\n3. Flip Order: CONDITIONAL {flip_side.upper()} at ${flip_trigger_price:.6f} (based on actual entry)")
+                flip_order = self.bybit.create_conditional_order(
+                    symbol=symbol,
+                    side=flip_side,
+                    amount=flip_contracts,
+                    trigger_price=flip_trigger_price,
+                    position_side=flip_position_side,
+                    order_type='Limit',
+                    limit_price=flip_trigger_price
+                )
+                
             self.log.info(f"Order ID: {flip_order.get('id', 'N/A')}")
             self.log.info(f"All orders placed successfully")
             
             # Log initial flip count (0 flips)
-            max_flips = self.config['strategy']['max_flips']
             self.log.flip_count_status(symbol, 0, max_flips)
             
         except Exception as e:
@@ -535,6 +547,7 @@ class TradingBot:
                         
                         # Calculate flip details
                         multiplier = self.config['strategy']['martingale_multiplier']
+                        max_flips = self.config['strategy']['max_flips']
                         position_size_usd = position_contracts * entry_price
                         flip_size_usd = position_size_usd * multiplier
                         flip_contracts = flip_size_usd / current_price
@@ -542,15 +555,27 @@ class TradingBot:
                         flip_side = 'sell' if position_side == 'long' else 'buy'
                         flip_position_side = 'short' if position_side == 'long' else 'long'
                         
-                        # Execute flip at market price
-                        print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
-                        flip_order = self.bybit.create_market_order(
-                            symbol=symbol,
-                            side=flip_side,
-                            amount=flip_contracts,
-                            position_side=flip_position_side
-                        )
-                        print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                        if current_flip_count >= max_flips:
+                            print(f"   Max flips reached. Executing STOP LOSS (Market Close).")
+                            flip_order = self.bybit.create_market_order(
+                                symbol=symbol,
+                                side=flip_side,
+                                amount=position_contracts,
+                                position_side=position_side, # Close current position
+                                params={'reduceOnly': True}
+                            )
+                            print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
+                        else:
+                    flip_contracts = next_flip_size_usd / current_price
+                            # Execute flip at market price
+                            print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                            flip_order = self.bybit.create_market_order(
+                                symbol=symbol,
+                                side=flip_side,
+                                amount=flip_contracts,
+                                position_side=flip_position_side
+                            )
+                            print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
                         
                         # Wait for fill then cleanup
                         await asyncio.sleep(2)
@@ -686,23 +711,33 @@ class TradingBot:
                         print(f"   Error fetching orders: {e}")
                     
                     # Calculate flip details
-                    multiplier = self.config['strategy']['martingale_multiplier']
                     position_size_usd = position_contracts * entry_price
-                    flip_size_usd = position_size_usd * multiplier
-                    flip_contracts = flip_size_usd / current_price
+                    next_flip_size_usd = self.calculator.calculate_next_position(current_flip_count, position_size_usd, 0)
                     
                     flip_side = 'sell' if position_side == 'long' else 'buy'
                     flip_position_side = 'short' if position_side == 'long' else 'long'
                     
-                    # Execute flip at market price
-                    print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
-                    flip_order = self.bybit.create_market_order(
-                        symbol=symbol,
-                        side=flip_side,
-                        amount=flip_contracts,
-                        position_side=flip_position_side
-                    )
-                    print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                    if next_flip_size_usd == 0:
+                        print(f"   Max flips reached. Executing STOP LOSS (Market Close).")
+                        flip_order = self.bybit.create_market_order(
+                            symbol=symbol,
+                            side=flip_side,
+                            amount=position_contracts,
+                            position_side=position_side, # Close current position
+                            params={'reduceOnly': True}
+                        )
+                        print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
+                    else:
+                        flip_contracts = next_flip_size_usd / current_price
+                        # Execute flip at market price
+                        print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                        flip_order = self.bybit.create_market_order(
+                            symbol=symbol,
+                            side=flip_side,
+                            amount=flip_contracts,
+                            position_side=flip_position_side
+                        )
+                        print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
                     
                     # Wait for fill then cleanup
                     await asyncio.sleep(2)
@@ -793,7 +828,7 @@ class TradingBot:
             position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
             current_flip_count = position_state.get('flip_count', 0)
             current_pnl = position_state.get('realized_pnl', 0.0)
-            max_flips = self.config['strategy']['max_flips']
+            max_flips = self.calculator.max_flips
             # Log flip count status 
             self.log.flip_count_status(symbol, current_flip_count, max_flips)
             self.log.info(f"Realized PnL (Current Cycle): ${current_pnl:.2f}")
@@ -830,11 +865,10 @@ class TradingBot:
                 flip_side = 'buy'
                 flip_position_side = 'long'
             
-            # Calculate next flip size
-            flip_size_usd = (new_contracts * new_entry) * multiplier
-            flip_contracts = flip_size_usd / flip_trigger
+            # Calculate next flip size using calculator
+            next_flip_size_usd = self.calculator.calculate_next_position(current_flip_count, new_contracts * new_entry, 0)
             
-            print(f"\nPlacing new TP + Flip for {new_side.upper()} position:")
+            print(f"\nPlacing new TP + {'Stop Loss' if next_flip_size_usd == 0 else 'Flip'} for {new_side.upper()} position:")
             
             # Place TP order
             tp_order = self.bybit.create_limit_order(
@@ -847,17 +881,33 @@ class TradingBot:
             )
             print(f"  TP at ${tp_price:.6f}: ")
             
-            # Place Flip order (conditional - only triggers at price level)
-            flip_order = self.bybit.create_conditional_order(
-                symbol=symbol,
-                side=flip_side,
-                amount=flip_contracts,
-                trigger_price=flip_trigger,
-                position_side=flip_position_side,
-                order_type='Limit',
-                limit_price=flip_trigger
-            )
-            print(f"  Flip at ${flip_trigger:.6f} ({flip_contracts:.4f} contracts): OK")
+            if next_flip_size_usd == 0:
+                self.log.warning(f"Max flips ({max_flips}) reached! Placing Stop Loss instead of Flip.")
+                
+                # Place Stop Loss (Close Position)
+                sl_order = self.bybit.create_conditional_order(
+                    symbol=symbol,
+                    side=flip_side,
+                    amount=new_contracts,
+                    trigger_price=flip_trigger,
+                    position_side=new_side,  # Close current position
+                    order_type='Market',     # Ensure exit
+                    params={'reduceOnly': True, 'triggerBy': 'LastPrice'}
+                )
+                print(f"  STOP LOSS at ${flip_trigger:.6f} (Close {new_contracts:.4f}): OK")
+            else:
+                flip_contracts = next_flip_size_usd / flip_trigger
+                # Place Flip order (conditional - only triggers at price level)
+                flip_order = self.bybit.create_conditional_order(
+                    symbol=symbol,
+                    side=flip_side,
+                    amount=flip_contracts,
+                    trigger_price=flip_trigger,
+                    position_side=flip_position_side,
+                    order_type='Limit',
+                    limit_price=flip_trigger
+                )
+                print(f"  Flip at ${flip_trigger:.6f} ({flip_contracts:.4f} contracts): OK")
             
             print(f"{'='*50}\n")
             
