@@ -288,6 +288,9 @@ class BybitClient:
         end_time = int(time.time() * 1000)  # Start fetching from NOW
         limit = 200  # Bybit max limit per request
         
+        # Keep track of IDs to detect if we are getting new data
+        seen_ids = set()
+        
         print(f"Fetching trade history for {symbol}...")
 
         while True:
@@ -299,11 +302,16 @@ class BybitClient:
                 if not trades:
                     break
 
-                # Sort to ensure we handle time correctly
+                # Sort to ensure we handle time correctly (fetch_my_trades returns list, usually sorted but we ensure)
                 trades.sort(key=lambda x: x['timestamp'])
                 
-                # Add to our master list
-                all_trades.extend(trades)
+                # Add new trades
+                new_trades_count = 0
+                for t in trades:
+                    if t['id'] not in seen_ids:
+                        all_trades.append(t)
+                        seen_ids.add(t['id'])
+                        new_trades_count += 1
                 
                 first_trade_time = trades[0]['timestamp']
 
@@ -316,9 +324,15 @@ class BybitClient:
                 if len(trades) < limit:
                     break
                 
-                # UPDATE POINTER: Set end_time to just before the oldest trade we found
-                # This prevents duplicates and moves the window back
-                end_time = first_trade_time - 1
+                # UPDATE POINTER
+                # If we didn't find any new trades, we might be stuck on a timestamp with many trades
+                # Force move back 1ms to break loop
+                if new_trades_count == 0:
+                     end_time = first_trade_time - 1
+                else:
+                    # Otherwise, try to fetch from the same timestamp again to catch any others at the same ms
+                    # But ensure we don't get stuck if we keep getting the same ones
+                    end_time = first_trade_time
                 
                 # Rate limit safety
                 time.sleep(0.1)
@@ -327,9 +341,9 @@ class BybitClient:
                 print(f"Error fetching trade history: {e}")
                 break
         
-        # Filter exact start time and dedup
-        unique_trades = {t['id']: t for t in all_trades if t['timestamp'] >= start_time_ms}
-        final_trades = sorted(unique_trades.values(), key=lambda x: x['timestamp'])
+        # Filter exact start time and dedup (already deduped via seen_ids, but filter time)
+        final_trades = [t for t in all_trades if t['timestamp'] >= start_time_ms]
+        final_trades.sort(key=lambda x: x['timestamp'])
         
         print(f"Retrieved {len(final_trades)} fills for {symbol}")
         return final_trades
