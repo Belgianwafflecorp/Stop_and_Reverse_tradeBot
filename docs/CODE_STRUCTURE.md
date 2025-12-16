@@ -75,6 +75,7 @@ Manages account balance data and initial risk sizing.
 **Key Functionality:**
 - **Balance Fetching:** Retrieves available USDT balance from the exchange.
 - **Initial Sizing:** Calculates the size of the *first* entry in a cycle (Flip 0) based on config (Fixed USD amount or % of Balance).
+- **Safety Checks:** `check_sufficient_balance` verifies if the wallet has enough funds for the next trade (including a buffer for fees) to prevent "Insufficient Funds" errors.
 
 ### 6. `src/logger.py`
 **Role:** Output & Logging.

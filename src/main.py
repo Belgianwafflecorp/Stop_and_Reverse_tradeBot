@@ -4,6 +4,7 @@ from logger import BotLogger
 import os
 import time
 import asyncio
+from ccxt.base.errors import InsufficientFunds
 
 # Fix for Windows event loop (required for WebSocket on Windows)
 if sys.platform == 'win32':
@@ -555,8 +556,19 @@ class TradingBot:
                         flip_side = 'sell' if position_side == 'long' else 'buy'
                         flip_position_side = 'short' if position_side == 'long' else 'long'
                         
-                        if current_flip_count >= max_flips:
-                            print(f"   Max flips reached. Executing STOP LOSS (Market Close).")
+                        # Determine if we should stop (Max Flips OR Insufficient Balance)
+                        should_stop = False
+                        stop_reason = ""
+
+                        if next_flip_size_usd == 0:
+                            should_stop = True
+                            stop_reason = "Max flips reached"
+                        elif not self.account.check_sufficient_balance(next_flip_size_usd):
+                            should_stop = True
+                            stop_reason = "Insufficient balance"
+
+                        if should_stop:
+                            print(f"   {stop_reason}. Executing STOP LOSS (Market Close).")
                             flip_order = self.bybit.create_market_order(
                                 symbol=symbol,
                                 side=flip_side,
@@ -566,16 +578,27 @@ class TradingBot:
                             )
                             print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                         else:
-                            flip_contracts = next_flip_size_usd / current_price
-                            # Execute flip at market price
-                            print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
-                            flip_order = self.bybit.create_market_order(
-                                symbol=symbol,
-                                side=flip_side,
-                                amount=flip_contracts,
-                                position_side=flip_position_side
-                            )
-                            print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                            try:
+                                flip_contracts = next_flip_size_usd / current_price
+                                # Execute flip at market price
+                                print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                                flip_order = self.bybit.create_market_order(
+                                    symbol=symbol,
+                                    side=flip_side,
+                                    amount=flip_contracts,
+                                    position_side=flip_position_side
+                                )
+                                print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                            except InsufficientFunds:
+                                print(f"   Insufficient Funds rejected by exchange. Executing STOP LOSS.")
+                                flip_order = self.bybit.create_market_order(
+                                    symbol=symbol,
+                                    side=flip_side,
+                                    amount=position_contracts,
+                                    position_side=position_side, # Close current position
+                                    params={'reduceOnly': True}
+                                )
+                                print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                         
                         # Wait for fill then cleanup
                         await asyncio.sleep(2)
@@ -717,8 +740,19 @@ class TradingBot:
                     flip_side = 'sell' if position_side == 'long' else 'buy'
                     flip_position_side = 'short' if position_side == 'long' else 'long'
                     
+                    # Determine if we should stop (Max Flips OR Insufficient Balance)
+                    should_stop = False
+                    stop_reason = ""
+
                     if next_flip_size_usd == 0:
-                        print(f"   Max flips reached. Executing STOP LOSS (Market Close).")
+                        should_stop = True
+                        stop_reason = "Max flips reached"
+                    elif not self.account.check_sufficient_balance(next_flip_size_usd):
+                        should_stop = True
+                        stop_reason = "Insufficient balance"
+
+                    if should_stop:
+                        print(f"   {stop_reason}. Executing STOP LOSS (Market Close).")
                         flip_order = self.bybit.create_market_order(
                             symbol=symbol,
                             side=flip_side,
@@ -728,16 +762,27 @@ class TradingBot:
                         )
                         print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                     else:
-                        flip_contracts = next_flip_size_usd / current_price
-                        # Execute flip at market price
-                        print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
-                        flip_order = self.bybit.create_market_order(
-                            symbol=symbol,
-                            side=flip_side,
-                            amount=flip_contracts,
-                            position_side=flip_position_side
-                        )
-                        print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                        try:
+                            flip_contracts = next_flip_size_usd / current_price
+                            # Execute flip at market price
+                            print(f"   Flip: {flip_side.upper()} {flip_contracts:.4f} contracts at market")
+                            flip_order = self.bybit.create_market_order(
+                                symbol=symbol,
+                                side=flip_side,
+                                amount=flip_contracts,
+                                position_side=flip_position_side
+                            )
+                            print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
+                        except InsufficientFunds:
+                            print(f"   Insufficient Funds rejected by exchange. Executing STOP LOSS.")
+                            flip_order = self.bybit.create_market_order(
+                                symbol=symbol,
+                                side=flip_side,
+                                amount=position_contracts,
+                                position_side=position_side, # Close current position
+                                params={'reduceOnly': True}
+                            )
+                            print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                     
                     # Wait for fill then cleanup
                     await asyncio.sleep(2)
@@ -955,52 +1000,6 @@ class TradingBot:
         except Exception as e:
             print(f"\n❌ ERROR EXITING POSITION: {e}")
             print(f"{'='*50}\n")
-
-    async def run_async(self):
-        """Main async run loop with WebSocket support."""
-        print("\n=== Trading Bot Started ===")
-        print(" WebSocket mode enabled for instant updates")
-        print("Press Ctrl+C to stop\n")
-        try:
-            while True:
-                try:
-                    # Start a new cycle (find coin and place entry)
-                    await self.start_cycle()
-                    # If we now have an active position, monitor it with WebSocket
-                    if self.active_coin:
-                        await self.monitor_position_websocket(self.active_coin)
-                    else:
-                        # No position - wait before next scan
-                        print("\nWaiting 60 seconds before next scan...")
-                        await self.interruptible_sleep(60)
-                except KeyboardInterrupt:
-                    print("\n\n=== Bot stopped by user ===")
-                    break
-                except Exception as e:
-                    print(f"\nCRITICAL ERROR: {e}")
-                    import traceback
-                    traceback.print_exc()
-                    print("Waiting 10 seconds before retry...")
-                    await asyncio.sleep(10)
-        finally:
-            print("Closing exchange connection...")
-            await self.bybit.close()
-    
-    def run(self):
-        """Wrapper to run async event loop."""
-        try:
-            asyncio.run(self.run_async())
-        except KeyboardInterrupt:
-            print("\n\n=== Bot stopped ===")
-
-if __name__ == "__main__":
-    # Check for command-line argument for config file
-    config_file = None
-    if len(sys.argv) > 1:
-        config_file = sys.argv[1]
-    
-    bot = TradingBot(config_file)
-    bot.run()
 
     async def run_async(self):
         """Main async run loop with WebSocket support."""

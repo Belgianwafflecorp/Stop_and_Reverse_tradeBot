@@ -122,5 +122,13 @@ class AccountManager:
         summary += "----------------------\n"
         
         return summary
+
+    def check_sufficient_balance(self, size_usd):
+        """
+        Checks if available balance is sufficient for the required margin of a new position.
+        """
+        balance = self.get_available_balance()
+        required_margin = size_usd / self.leverage
         
-        return summary
+        # Add 1% buffer for fees/slippage
+        return balance >= (required_margin * 1.01)
