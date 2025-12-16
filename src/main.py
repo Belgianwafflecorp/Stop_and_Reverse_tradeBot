@@ -129,7 +129,9 @@ class TradingBot:
             # Check if we should manually trigger flip (price already past trigger level)
             current_position = long_pos or short_pos
             if current_position:
-                self.check_manual_flip_trigger(self.active_coin, current_position)
+                triggered = self.check_manual_flip_trigger(self.active_coin, current_position)
+                if not triggered:
+                    self.reconcile_orders(self.active_coin, current_position)
             # Monitoring will be handled by run_async via WebSocket
             return
         # Check if we have ANY open positions on the exchange (prevents multiple pairs)
@@ -330,6 +332,9 @@ class TradingBot:
             
             # 3. Place flip order or Stop Loss based on calculator decision
             if next_flip_size_usd == 0:
+                # Stop Loss Trigger Direction: 1 (Rise) for Short SL, 2 (Fall) for Long SL
+                sl_trigger_direction = 2 if position_side == 'long' else 1
+                
                 print(f"\n3. Stop Loss: CONDITIONAL {flip_side.upper()} at ${flip_trigger_price:.6f}")
                 flip_order = self.bybit.create_conditional_order(
                     symbol=symbol,
@@ -338,7 +343,7 @@ class TradingBot:
                     trigger_price=flip_trigger_price,
                     position_side=position_side, # Close current position
                     order_type='Market',
-                    params={'reduceOnly': True, 'triggerBy': 'LastPrice'}
+                    params={'reduceOnly': True, 'triggerBy': 'LastPrice', 'triggerDirection': sl_trigger_direction}
                 )
             else:
                 flip_contracts = next_flip_size_usd / flip_trigger_price
@@ -365,8 +370,84 @@ class TradingBot:
             # Clear active coin on error so we can try again
             self.active_coin = None
 
+    def reconcile_orders(self, symbol, current_position):
+        """
+        Ensures that the correct TP and Flip/StopLoss orders exist for a resumed position.
+        Cancels existing orders and places new ones based on current state.
+        """
+        self.log.info(f"Reconciling orders for {symbol}...")
+        
+        # 1. Cancel existing orders to ensure clean state
+        try:
+            open_orders = self.bybit.fetch_open_orders(symbol)
+            if open_orders:
+                self.log.info(f"Cancelling {len(open_orders)} existing orders to replace them...")
+                for order in open_orders:
+                    self.bybit.cancel_order(order['id'], symbol)
+        except Exception as e:
+            self.log.error(f"Error cancelling orders during reconciliation: {e}")
+
+        # 2. Get position details
+        side = current_position['side']
+        contracts = abs(float(current_position.get('contracts', 0)))
+        entry_price = float(current_position.get('entryPrice', 0))
+        
+        # 3. Get state (flip count)
+        state = self.tracker.analyze_position_state(symbol)
+        flip_count = state.get('flip_count', 0)
+        
+        # 4. Calculate prices
+        current_price, range_pct = self.get_dynamic_range_and_price(symbol, flip_count)
+        
+        if side == 'long':
+            tp_price = entry_price * (1 + range_pct / 100)
+            flip_trigger_price = entry_price * (1 - range_pct / 100)
+            tp_side = 'sell'
+            flip_side = 'sell'
+            flip_position_side = 'short'
+        else:
+            tp_price = entry_price * (1 - range_pct / 100)
+            flip_trigger_price = entry_price * (1 + range_pct / 100)
+            tp_side = 'buy'
+            flip_side = 'buy'
+            flip_position_side = 'long'
+
+        # 5. Calculate Next Position Size (to decide Flip vs SL)
+        position_size_usd = contracts * entry_price
+        next_flip_size_usd = self.calculator.calculate_next_position(flip_count, position_size_usd, 0)
+        
+        # 6. Place TP Order
+        try:
+            self.log.info(f"Placing reconciled TP at ${tp_price:.6f}")
+            self.bybit.create_limit_order(symbol, tp_side, contracts, tp_price, side, params={'reduceOnly': True})
+        except Exception as e:
+            self.log.error(f"Failed to place reconciled TP: {e}")
+
+        # 7. Place Flip or Stop Loss Order
+        try:
+            should_stop = False
+            if next_flip_size_usd == 0:
+                should_stop = True
+                self.log.warning(f"Max flips ({self.calculator.max_flips}) reached! Placing Stop Loss.")
+            elif not self.account.check_sufficient_balance(next_flip_size_usd):
+                should_stop = True
+                self.log.warning(f"Insufficient balance for next flip! Placing Stop Loss.")
+            
+            if should_stop:
+                sl_trigger_direction = 2 if side == 'long' else 1
+                self.bybit.create_conditional_order(symbol, flip_side, contracts, flip_trigger_price, side, 'Market', 
+                    params={'reduceOnly': True, 'triggerBy': 'LastPrice', 'triggerDirection': sl_trigger_direction})
+                self.log.info(f"Placed Stop Loss at ${flip_trigger_price:.6f}")
+            else:
+                flip_contracts = next_flip_size_usd / flip_trigger_price
+                self.log.info(f"Placing reconciled Flip Order at ${flip_trigger_price:.6f}")
+                self.bybit.create_conditional_order(symbol, flip_side, flip_contracts, flip_trigger_price, flip_position_side, 'Limit', flip_trigger_price)
+        except Exception as e:
+            self.log.error(f"Failed to place reconciled Flip/SL order: {e}")
+
     def check_manual_flip_trigger(self, symbol, current_position):
         """Check if flip should be manually triggered (price already past trigger level)."""
+        triggered = False
         try:
             position_side = current_position['side']
             entry_price = float(current_position.get('entryPrice', 0))
@@ -409,6 +490,7 @@ class TradingBot:
                 position_size_usd = position_contracts * entry_price
                 flip_size_usd = position_size_usd * multiplier
                 flip_contracts = flip_size_usd / current_price
+                next_flip_size_usd = self.calculator.calculate_next_position(flip_count, position_size_usd, 0)
                 
                 # Determine flip side
                 flip_side = 'sell' if position_side == 'long' else 'buy'
@@ -423,11 +505,44 @@ class TradingBot:
                     position_side=flip_position_side
                 )
                 print(f"   Flip order placed: {flip_order.get('id', 'N/A')}")
+                # Determine if we should stop (Max Flips OR Insufficient Balance)
+                should_stop = False
+                stop_reason = ""
+
+                if next_flip_size_usd == 0:
+                    should_stop = True
+                    stop_reason = "Max flips reached"
+                elif not self.account.check_sufficient_balance(next_flip_size_usd):
+                    should_stop = True
+                    stop_reason = "Insufficient balance"
+
+                if should_stop:
+                    print(f"   {stop_reason}. Executing STOP LOSS (Market Close).")
+                    flip_order = self.bybit.create_market_order(
+                        symbol=symbol,
+                        side=flip_side,
+                        amount=position_contracts,
+                        position_side=position_side, # Close current position
+                        params={'reduceOnly': True}
+                    )
+                    print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
+                else:
+                    flip_contracts = next_flip_size_usd / current_price
+                    # Place flip order at market
+                    print(f"\n   Placing flip order: {flip_side.upper()} {flip_contracts:.4f} contracts")
+                    flip_order = self.bybit.create_market_order(
+                        symbol=symbol,
+                        side=flip_side,
+                        amount=flip_contracts,
+                        position_side=flip_position_side
+                    )
+                    print(f"   Flip order placed: {flip_order.get('id', 'N/A')}")
                 
                 # Wait a moment for order to fill
                 time.sleep(2)
                 
                 # Now both positions should exist - trigger cleanup
+                # Trigger cleanup
                 positions = self.bybit.fetch_open_positions()
                 long_pos = None
                 short_pos = None
@@ -443,11 +558,15 @@ class TradingBot:
                     self.handle_flip_cleanup(symbol, long_pos, short_pos)
                 else:
                     print("   WARNING: Expected both positions after flip, cleanup may be needed")
+                
+                triggered = True
                     
         except Exception as e:
             print(f"Error checking manual flip trigger: {e}")
             import traceback
             traceback.print_exc()
+        
+        return triggered
 
     async def monitor_position_websocket(self, symbol):
         """Monitor position using WebSocket for instant updates."""
@@ -926,6 +1045,9 @@ class TradingBot:
             if next_flip_size_usd == 0:
                 self.log.warning(f"Max flips ({max_flips}) reached! Placing Stop Loss instead of Flip.")
                 
+                # Stop Loss Trigger Direction: 1 (Rise) for Short SL, 2 (Fall) for Long SL
+                sl_trigger_direction = 2 if new_side == 'long' else 1
+                
                 # Place Stop Loss (Close Position)
                 sl_order = self.bybit.create_conditional_order(
                     symbol=symbol,
@@ -934,7 +1056,7 @@ class TradingBot:
                     trigger_price=flip_trigger,
                     position_side=new_side,  # Close current position
                     order_type='Market',     # Ensure exit
-                    params={'reduceOnly': True, 'triggerBy': 'LastPrice'}
+                    params={'reduceOnly': True, 'triggerBy': 'LastPrice', 'triggerDirection': sl_trigger_direction}
                 )
                 print(f"  STOP LOSS at ${flip_trigger:.6f} (Close {new_contracts:.4f}): OK")
             else:
