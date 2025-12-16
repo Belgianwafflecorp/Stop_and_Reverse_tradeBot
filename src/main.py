@@ -4,7 +4,7 @@ from logger import BotLogger
 import os
 import time
 import asyncio
-from ccxt.base.errors import InsufficientFunds
+import ccxt
 
 # Fix for Windows event loop (required for WebSocket on Windows)
 if sys.platform == 'win32':
@@ -547,11 +547,8 @@ class TradingBot:
                             print(f"   Error fetching orders: {e}")
                         
                         # Calculate flip details
-                        multiplier = self.config['strategy']['martingale_multiplier']
-                        max_flips = self.config['strategy']['max_flips']
                         position_size_usd = position_contracts * entry_price
-                        flip_size_usd = position_size_usd * multiplier
-                        flip_contracts = flip_size_usd / current_price
+                        next_flip_size_usd = self.calculator.calculate_next_position(current_flip_count, position_size_usd, 0)
                         
                         flip_side = 'sell' if position_side == 'long' else 'buy'
                         flip_position_side = 'short' if position_side == 'long' else 'long'
@@ -589,7 +586,7 @@ class TradingBot:
                                     position_side=flip_position_side
                                 )
                                 print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
-                            except InsufficientFunds:
+                            except ccxt.InsufficientFunds:
                                 print(f"   Insufficient Funds rejected by exchange. Executing STOP LOSS.")
                                 flip_order = self.bybit.create_market_order(
                                     symbol=symbol,
@@ -773,7 +770,7 @@ class TradingBot:
                                 position_side=flip_position_side
                             )
                             print(f"   Flip executed: {flip_order.get('id', 'N/A')}")
-                        except InsufficientFunds:
+                        except ccxt.InsufficientFunds:
                             print(f"   Insufficient Funds rejected by exchange. Executing STOP LOSS.")
                             flip_order = self.bybit.create_market_order(
                                 symbol=symbol,
