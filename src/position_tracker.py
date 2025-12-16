@@ -27,6 +27,10 @@ class PositionTracker:
         # Calculate start time for fill fetching
         start_time_ms = int(time.time() * 1000) - (lookback_hours * 60 * 60 * 1000)
         
+        # 1. Get Current Live Position (The Anchor)
+        open_positions = self.client.fetch_open_positions()
+        current_pos_data = next((p for p in open_positions if p['symbol'] == symbol), None) if open_positions else None
+        
         # Fetch all fills in the lookback period
         fills = self.client.fetch_all_fills(symbol, start_time_ms)
         
@@ -44,8 +48,8 @@ class PositionTracker:
                 'cycle_complete': False
             }
         
-        # Detect current cycle boundary
-        cycle_fills = self._get_current_cycle_fills(fills)
+        # Detect current cycle boundary using Backward Reconstruction
+        cycle_fills = self._get_current_cycle_fills(fills, current_pos_data)
         
         # Calculate net position from CURRENT CYCLE fills only
         net_qty = 0.0
@@ -111,52 +115,70 @@ class PositionTracker:
             'cycle_complete': cycle_complete
         }
     
-    def _get_current_cycle_fills(self, fills):
+    def _get_current_cycle_fills(self, fills, current_pos_data):
         """
         Extracts fills belonging to the current trading cycle.
-        Detects cycle boundaries by analyzing position closures and size patterns.
-        
-        Strategy:
-        - Cycle ENDS when position closes completely (net position = 0)
-        - New cycle STARTS with next position opening
-        - Handles both: flipping cycles AND simple open->close->open patterns
+        Uses Backward Reconstruction from the current known position.
         
         :param fills: All fills sorted by timestamp
+        :param current_pos_data: Dictionary of current open position from exchange
         :return: List of fills from current cycle only
         """
         if not fills:
             return []
         
-        # Track running position through all fills to find closure points
-        cycle_boundaries = [0]  # Start of first cycle
-        running_position = 0.0
+        # If we have no open position currently, then the cycle is either complete or empty.
+        # We need to find the last time the position WAS open.
+        # But for "Flip Counting", we usually care about the active cycle.
+        # If current_pos is 0, we look for the last closed cycle? 
+        # No, if pos is 0, we return the fills since the last 0 before that?
         
-        for i, fill in enumerate(fills):
-            qty = fill['amount']
-            
-            prev_position = running_position
-            
-            # Update running position
-            if fill['side'] == 'buy':
-                running_position += qty
+        # Determine current signed quantity
+        current_signed_qty = 0.0
+        if current_pos_data:
+            qty = float(current_pos_data.get('contracts', 0))
+            if current_pos_data['side'] == 'short':
+                current_signed_qty = -qty
             else:
-                running_position -= qty
+                current_signed_qty = qty
+        
+        # Work BACKWARDS from current state
+        # We are looking for the point where position was ZERO.
+        # That point marks the *start* of the current accumulation.
+        
+        simulated_qty = current_signed_qty
+        start_index = 0
+        
+        # Iterate backwards (Newest -> Oldest)
+        for i in range(len(fills) - 1, -1, -1):
+            fill = fills[i]
+            qty = fill['amount']
+            side = fill['side'] # 'buy' or 'sell'
             
-            # Detect position closure (crossed zero or became zero)
-            # Previous position was non-zero, now it's zero or crossed zero
-            if abs(prev_position) > 0.001:
-                # Position closed completely
-                if abs(running_position) < 0.001:
-                    # Mark next fill as potential new cycle start
-                    if i + 1 < len(fills):
-                        cycle_boundaries.append(i + 1)
+            # Reverse the trade effect
+            if side == 'buy':
+                simulated_qty -= qty # Undo buy
+            else:
+                simulated_qty += qty # Undo sell
+            
+            # Check if we hit zero (or crossed it significantly in a way that implies closure)
+            # Using a small epsilon for float precision
+            if abs(simulated_qty) < 0.001:
+                # We found the zero point!
+                # The cycle starts at the NEXT fill (chronologically)
+                # So in this backward loop, it's the current index 'i'.
+                # Wait, if fills[i] brought us TO zero (backwards), it means fills[i] started the position (forwards).
+                # So fills[i] IS part of the cycle.
+                start_index = i
+                break
+            
+            # Safety: If we crossed zero signs (e.g. +10 to -10), it means we found a flip point.
+            # But a flip is part of a cycle. We want the START of the cycle (0 to Something).
+            # If we go from +10 to -10 (backwards), it means forwards was -10 to +10.
+            # This is just a flip. We continue back.
         
-        # Get fills from the last cycle boundary to end
-        if cycle_boundaries:
-            last_boundary = cycle_boundaries[-1]
-            return fills[last_boundary:]
-        
-        return fills
+        # Return the slice from the found start index to the end
+        return fills[start_index:]
     
     def _count_flips(self, fills):
         """
