@@ -21,6 +21,7 @@ class MarketScanner:
         self.balance_compound = config['account']['balance_compound']
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.fixed_initial_order = config['account']['fixed_initial_order_usd']
+        self.target_leverage = config['strategy']['leverage']
 
     def get_best_volatile_coin(self):
         """
@@ -94,6 +95,16 @@ class MarketScanner:
                    'innovation' in str(info.get('category', '')).lower() or \
                    str(info.get('symbolType', '')).lower() == 'innovation':
                     continue
+            
+            # Filter: Check if coin supports our target leverage
+            # ST (Special Treatment) coins often have low max leverage (e.g. 5x)
+            # We also enforce a standard minimum of 10x to filter out low-quality assets
+            limits = market.get('limits', {})
+            leverage_limits = limits.get('leverage', {})
+            max_leverage = leverage_limits.get('max')
+            
+            if max_leverage is not None and (max_leverage < self.target_leverage or max_leverage < 10):
+                continue
             
             # Filter 3: Calculate 24h percentage change
             percentage = data.get('percentage')
