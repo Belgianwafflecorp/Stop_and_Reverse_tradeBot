@@ -1,4 +1,5 @@
 import time
+import math
 
 class PositionTracker:
     """
@@ -12,6 +13,7 @@ class PositionTracker:
         :param config: Bot configuration dictionary (needed for initial_entry_pct and multiplier)
         """
         self.client = bybit_client
+        self.config = config
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.multiplier = config['strategy']['martingale_multiplier']
     
@@ -29,7 +31,18 @@ class PositionTracker:
         
         # 1. Get Current Live Position (The Anchor)
         open_positions = self.client.fetch_open_positions()
-        current_pos_data = next((p for p in open_positions if p['symbol'] == symbol), None) if open_positions else None
+        
+        # Find relevant positions and determine the active/dominant one
+        current_pos_data = None
+        current_size_usd = 0.0
+        
+        if open_positions:
+            symbol_positions = [p for p in open_positions if p['symbol'] == symbol]
+            if symbol_positions:
+                # Sort by size (contracts * price) to find the dominant position
+                symbol_positions.sort(key=lambda x: float(x.get('contracts', 0)) * float(x.get('entryPrice', 0)), reverse=True)
+                current_pos_data = symbol_positions[0]
+                current_size_usd = float(current_pos_data.get('contracts', 0)) * float(current_pos_data.get('entryPrice', 0))
         
         # Fetch all fills in the lookback period
         fills = self.client.fetch_all_fills(symbol, start_time_ms)
@@ -71,24 +84,31 @@ class PositionTracker:
                 total_sell_cost += (qty * price)
                 total_sell_qty += qty
         
-        # Determine if currently in a position (account for floating point precision)
-        in_position = abs(net_qty) > 0.001
+        # Use LIVE data for current state if available, otherwise fallback to calculated
+        if current_pos_data:
+            net_qty = float(current_pos_data.get('contracts', 0))
+            if current_pos_data['side'] == 'short':
+                net_qty = -net_qty
+            
+            average_entry = float(current_pos_data.get('entryPrice', 0))
+            in_position = abs(net_qty) > 0.0
+            current_side = current_pos_data['side']
+        else:
+            # Fallback to fill reconstruction
+            in_position = abs(net_qty) > 0.001
+            current_side = None
+            if in_position:
+                current_side = 'long' if net_qty > 0 else 'short'
+            
+            average_entry = 0.0
+            if in_position:
+                if current_side == 'long' and total_buy_qty > 0:
+                    average_entry = total_buy_cost / total_buy_qty
+                elif current_side == 'short' and total_sell_qty > 0:
+                    average_entry = total_sell_cost / total_sell_qty
         
-        # Determine current side
-        current_side = None
-        if in_position:
-            current_side = 'long' if net_qty > 0 else 'short'
-        
-        # Calculate average entry price for current position
-        average_entry = 0.0
-        if in_position:
-            if current_side == 'long' and total_buy_qty > 0:
-                average_entry = total_buy_cost / total_buy_qty
-            elif current_side == 'short' and total_sell_qty > 0:
-                average_entry = total_sell_cost / total_sell_qty
-        
-        # Count flips (direction reversals) in CURRENT CYCLE only
-        flip_count = self._count_flips(cycle_fills)
+        # Calculate flip count mathematically based on position size
+        flip_count = self._calculate_flip_count_math(current_size_usd)
         
         # Calculate realized PnL for current cycle
         realized_pnl = self._calculate_realized_pnl(cycle_fills)
@@ -115,6 +135,45 @@ class PositionTracker:
             'cycle_complete': cycle_complete
         }
     
+    def _calculate_flip_count_math(self, current_size_usd):
+        """
+        Calculates flip count mathematically: log(Current / Base) / log(Multiplier)
+        This avoids issues with missing trade history.
+        """
+        if current_size_usd <= 0:
+            return 0
+            
+        try:
+            account_config = self.config['account']
+            base_size_usd = account_config.get('fixed_initial_order_usd', 10.0)
+            
+            # If compound mode, try to estimate base size from balance
+            if account_config.get('balance_compound', False):
+                try:
+                    # Fetch balance to estimate base size
+                    balance_data = self.client.exchange.fetch_balance()
+                    usdt = balance_data.get('USDT', {})
+                    balance = float(usdt.get('free') or usdt.get('total') or 0)
+                    if balance > 0:
+                        pct = self.config['strategy']['initial_entry_pct']
+                        base_size_usd = balance * (pct / 100.0)
+                except Exception:
+                    pass # Fallback to fixed or default
+            
+            if base_size_usd <= 0: return 0
+            if self.multiplier <= 1.0: return 0
+            
+            ratio = current_size_usd / base_size_usd
+            
+            # Allow for slight slippage (e.g. ratio 0.95 is still flip 0)
+            if ratio < 0.9: return 0
+            
+            flips = math.log(ratio) / math.log(self.multiplier)
+            return max(0, round(flips))
+            
+        except Exception:
+            return 0
+
     def _get_current_cycle_fills(self, fills, current_pos_data):
         """
         Extracts fills belonging to the current trading cycle.

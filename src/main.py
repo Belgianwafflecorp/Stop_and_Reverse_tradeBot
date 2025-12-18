@@ -283,7 +283,7 @@ class TradingBot:
             print(f"   {entry_order.get('id', 'N/A')}")
             
             # Wait for entry to fill
-            time.sleep(2)
+            time.sleep(1)
             
             # Fetch actual fill price from position (market orders may have slippage)
             positions = self.bybit.fetch_open_positions()
@@ -539,7 +539,7 @@ class TradingBot:
                     print(f"   Flip order placed: {flip_order.get('id', 'N/A')}")
                 
                 # Wait a moment for order to fill
-                time.sleep(2)
+                time.sleep(1)
                 
                 # Now both positions should exist - trigger cleanup
                 # Trigger cleanup
@@ -717,7 +717,7 @@ class TradingBot:
                                 print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                         
                         # Wait for fill then cleanup
-                        await asyncio.sleep(2)
+                        await asyncio.sleep(1)
                         positions = self.bybit.fetch_open_positions()
                         long_pos = None
                         short_pos = None
@@ -901,7 +901,7 @@ class TradingBot:
                             print(f"   Stop Loss executed: {flip_order.get('id', 'N/A')}")
                     
                     # Wait for fill then cleanup
-                    await asyncio.sleep(2)
+                    await asyncio.sleep(1)
                     positions = self.bybit.fetch_open_positions()
                     long_pos = None
                     short_pos = None
@@ -982,7 +982,7 @@ class TradingBot:
             )
             self.log.info(f"Order ID: {close_order.get('id', 'N/A')}")
             
-            # Wait briefly for fill to be indexed
+            # Wait for fill to be indexed
             time.sleep(1)
             
             # Get current flip count from position tracker
