@@ -18,7 +18,8 @@
     "timeframe_1_minutes": 720,
     "timeframe_1_change_pct": 2.0,
     "timeframe_2_minutes": 5,
-    "timeframe_2_change_pct": 1.5
+    "timeframe_2_change_pct": 1.5,
+    "min_candidate_score": 1.5
   },
   
   "strategy": {
