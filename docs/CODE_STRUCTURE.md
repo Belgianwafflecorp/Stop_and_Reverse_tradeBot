@@ -67,6 +67,7 @@ Responsible for scanning the market to find the best coin to trade next.
     - Checks macro trend (e.g., 24h change).
     - Confirms with micro momentum (e.g., 5m change).
 - **Volatility Scoring:** Scores candidates based on recent volatility to ensure the bot enters coins that are moving.
+    - Applies a minimum score threshold (`min_candidate_score`) to filter out weak candidates.
 
 ### 5. `src/account_manager.py`
 **Role:** Wallet & Risk Management.

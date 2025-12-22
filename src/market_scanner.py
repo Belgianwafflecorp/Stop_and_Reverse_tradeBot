@@ -18,6 +18,7 @@ class MarketScanner:
         self.timeframe_1_threshold = config['scanner_settings'].get('timeframe_1_change_pct', 2.0)
         self.timeframe_2_minutes = config['scanner_settings'].get('timeframe_2_minutes', 5)    # 5m default
         self.timeframe_2_threshold = config['scanner_settings'].get('timeframe_2_change_pct', 0.2)
+        self.min_candidate_score = config['scanner_settings'].get('min_candidate_score', 1.5)
         self.balance_compound = config['account']['balance_compound']
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.fixed_initial_order = config['account']['fixed_initial_order_usd']
@@ -172,6 +173,10 @@ class MarketScanner:
             # Weight: 70% recent volatility + 30% timeframe_2 movement
             combined_score = (recent_vol * 0.7) + (timeframe_2_move * 0.3)
             
+            # Filter by minimum score
+            if combined_score < self.min_candidate_score:
+                continue
+            
             candidates_found.append({
                 'symbol': symbol,
                 'score': combined_score,
@@ -197,7 +202,7 @@ class MarketScanner:
             print(f"\nWinner: {best_coin} (Score: {highest_score:.2f}) - Direction: {best_direction}")
             return {'symbol': best_coin, 'direction': best_direction}
         else:
-            print(f"\nNo coins found with sufficient {tf2_display} movement (>{self.timeframe_2_threshold}%)")
+            print(f"\nNo coins found with sufficient {tf2_display} movement (>{self.timeframe_2_threshold}%) or score (>{self.min_candidate_score})")
         
         return None
 

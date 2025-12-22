@@ -82,6 +82,12 @@ Complete documentation for all configuration parameters in `config.json`.
 - **Description:** Minimum percentage change required over `timeframe_2_minutes`.
 - **This is your "moving now" filter** - confirms current momentum.
 
+### `scanner_settings.min_candidate_score`
+- **Default:** `1.5`
+- **Description:** Minimum combined score required for a candidate to be selected.
+- **Calculation:** Score = (Recent Volatility × 0.7) + (Timeframe 2 Movement × 0.3).
+- **Purpose:** Ensures candidates have a healthy mix of historical volatility and current momentum.
+
 ---
 
 ## Strategy Settings
