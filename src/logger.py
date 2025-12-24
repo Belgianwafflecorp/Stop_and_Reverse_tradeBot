@@ -9,19 +9,28 @@ class BotLogger:
     Handles timestamps, formatting, and different log levels.
     """
     
-    def __init__(self, name="TradingBot", log_dir="logs"):
+    def __init__(self, name="TradingBot", log_dir="logs", save_to_file=False):
         """Initialize the logger with file and console output."""
         self.logger = logging.getLogger(name)
         self.logger.setLevel(logging.DEBUG)
         
-        # Create logs directory if it doesn't exist
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
+        # Professional formatter with timestamps
+        formatter = logging.Formatter(
+            '%(asctime)s | %(levelname)-8s | %(message)s',
+            datefmt='%Y-%m-%d %H:%M:%S'
+        )
         
-        # File handler (debug level - captures everything)
-        log_file = os.path.join(log_dir, f"trading_bot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
-        file_handler = logging.FileHandler(log_file, encoding='utf-8')
-        file_handler.setLevel(logging.DEBUG)
+        if save_to_file:
+            # Create logs directory if it doesn't exist
+            if not os.path.exists(log_dir):
+                os.makedirs(log_dir)
+            
+            # File handler (debug level - captures everything)
+            log_file = os.path.join(log_dir, f"trading_bot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log")
+            file_handler = logging.FileHandler(log_file, encoding='utf-8')
+            file_handler.setLevel(logging.DEBUG)
+            file_handler.setFormatter(formatter)
+            self.logger.addHandler(file_handler)
         
         # Console handler (info level and above)
         # Force UTF-8 encoding for console output on Windows
@@ -31,17 +40,9 @@ class BotLogger:
             console_handler = logging.StreamHandler()
         console_handler.setLevel(logging.INFO)
         
-        # Professional formatter with timestamps
-        formatter = logging.Formatter(
-            '%(asctime)s | %(levelname)-8s | %(message)s',
-            datefmt='%Y-%m-%d %H:%M:%S'
-        )
-        
-        file_handler.setFormatter(formatter)
         console_handler.setFormatter(formatter)
         
         # Add handlers
-        self.logger.addHandler(file_handler)
         self.logger.addHandler(console_handler)
     
     def info(self, message):

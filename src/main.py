@@ -24,8 +24,8 @@ from src.account_manager import AccountManager
 from src.json_handler import load_config, load_api_keys, get_config_path
 
 class TradingBot:
-    def __init__(self, config_file=None):
-        self.log = BotLogger()
+    def __init__(self, config_file=None, save_logs=False):
+        self.log = BotLogger(save_to_file=save_logs)
         # 1. Load Configs using centralized handler
         try:
             self.config_path = get_config_path(config_file)
@@ -1161,8 +1161,13 @@ class TradingBot:
 if __name__ == "__main__":
     # Check for command-line argument for config file
     config_file = None
-    if len(sys.argv) > 1:
-        config_file = sys.argv[1]
+    save_logs = False
     
-    bot = TradingBot(config_file)
+    for arg in sys.argv[1:]:
+        if arg == "-logs":
+            save_logs = True
+        elif not arg.startswith("-"):
+            config_file = arg
+    
+    bot = TradingBot(config_file, save_logs=save_logs)
     bot.run()
