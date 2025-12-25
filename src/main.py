@@ -125,12 +125,12 @@ class TradingBot:
             # If both positions exist, flip happened while offline
             if long_pos and short_pos:
                 self.log.warning("Flip detected during offline period - cleaning up now")
-                self.handle_flip_cleanup(self.active_coin, long_pos, short_pos)
+                await self.handle_flip_cleanup(self.active_coin, long_pos, short_pos)
                 return
             # Check if we should manually trigger flip (price already past trigger level)
             current_position = long_pos or short_pos
             if current_position:
-                triggered = self.check_manual_flip_trigger(self.active_coin, current_position)
+                triggered = await self.check_manual_flip_trigger(self.active_coin, current_position)
                 if not triggered:
                     self.reconcile_orders(self.active_coin, current_position)
             # Monitoring will be handled by run_async via WebSocket
@@ -167,7 +167,7 @@ class TradingBot:
             self.log.info("Detected existing position on exchange. Resuming monitoring...")
         else:
             self.log.info("No existing position. Placing initial entry...")
-            self.place_initial_entry(self.active_coin, self.entry_direction)
+            await self.place_initial_entry(self.active_coin, self.entry_direction)
 
     def get_dynamic_range_and_price(self, symbol, flip_count=0):
         """
@@ -202,7 +202,7 @@ class TradingBot:
                 current_price = 0.0
             return current_price, base_range
 
-    def place_initial_entry(self, symbol, direction):
+    async def place_initial_entry(self, symbol, direction):
         """Places the initial entry order for a new cycle."""
         try:
             # Calculate position size
@@ -284,7 +284,7 @@ class TradingBot:
             print(f"   {entry_order.get('id', 'N/A')}")
             
             # Wait for entry to fill
-            time.sleep(1)
+            await asyncio.sleep(1)
             
             # Fetch actual fill price from position (market orders may have slippage)
             positions = self.bybit.fetch_open_positions()
@@ -446,7 +446,7 @@ class TradingBot:
         except Exception as e:
             self.log.error(f"Failed to place reconciled Flip/SL order: {e}")
 
-    def check_manual_flip_trigger(self, symbol, current_position):
+    async def check_manual_flip_trigger(self, symbol, current_position):
         """Check if flip should be manually triggered (price already past trigger level)."""
         triggered = False
         try:
@@ -540,7 +540,7 @@ class TradingBot:
                     print(f"   Flip order placed: {flip_order.get('id', 'N/A')}")
                 
                 # Wait a moment for order to fill
-                time.sleep(1)
+                await asyncio.sleep(1)
                 
                 # Now both positions should exist - trigger cleanup
                 # Trigger cleanup
@@ -556,7 +556,7 @@ class TradingBot:
                             short_pos = pos
                 
                 if long_pos and short_pos:
-                    self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                    await self.handle_flip_cleanup(symbol, long_pos, short_pos)
                 else:
                     print("   WARNING: Expected both positions after flip, cleanup may be needed")
                 
@@ -597,7 +597,7 @@ class TradingBot:
                     # INSTANT flip detection - both positions exist
                     if long_position and short_position:
                         print(" FLIP DETECTED (WebSocket) - Both positions open!")
-                        current_flip_count = self.handle_flip_cleanup(symbol, long_position, short_position)
+                        current_flip_count = await self.handle_flip_cleanup(symbol, long_position, short_position)
                         # After cleanup, continue monitoring the new position
                         continue
                     
@@ -732,7 +732,7 @@ class TradingBot:
                                         short_pos = pos
                         
                         if long_pos and short_pos:
-                            current_flip_count = self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                            current_flip_count = await self.handle_flip_cleanup(symbol, long_pos, short_pos)
                         else:
                             print("   WARNING: Expected both positions after flip")
                         
@@ -785,7 +785,7 @@ class TradingBot:
                 # Determine current state
                 if long_position and short_position:
                     print("WARNING: Both long and short positions detected - flip occurred!")
-                    current_flip_count = self.handle_flip_cleanup(symbol, long_position, short_position)
+                    current_flip_count = await self.handle_flip_cleanup(symbol, long_position, short_position)
                     continue
                 
                 if not long_position and not short_position:
@@ -916,7 +916,7 @@ class TradingBot:
                                     short_pos = pos
                     
                     if long_pos and short_pos:
-                        current_flip_count = self.handle_flip_cleanup(symbol, long_pos, short_pos)
+                        current_flip_count = await self.handle_flip_cleanup(symbol, long_pos, short_pos)
                     else:
                         print("   WARNING: Expected both positions after flip")
                     
@@ -937,7 +937,7 @@ class TradingBot:
                     return
                 await self.interruptible_sleep(10)
 
-    def handle_flip_cleanup(self, symbol, long_position, short_position):
+    async def handle_flip_cleanup(self, symbol, long_position, short_position):
         """Handles cleanup when both long and short positions exist (flip just occurred)."""
         try:
             # Determine which is the old position (smaller one) and which is new
@@ -984,7 +984,7 @@ class TradingBot:
             self.log.info(f"Order ID: {close_order.get('id', 'N/A')}")
             
             # Wait for fill to be indexed
-            time.sleep(1)
+            await asyncio.sleep(1)
             
             # Get current flip count from position tracker
             position_state = self.tracker.analyze_position_state(symbol, lookback_hours=24)
