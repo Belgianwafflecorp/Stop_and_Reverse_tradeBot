@@ -1,6 +1,7 @@
 {
   "api": {
-    "testnet": false
+    "testnet": false,
+    "copytrading": true
   },
   
   "account": {

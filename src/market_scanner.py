@@ -23,6 +23,7 @@ class MarketScanner:
         self.initial_entry_pct = config['strategy']['initial_entry_pct']
         self.fixed_initial_order = config['account']['fixed_initial_order_usd']
         self.target_leverage = config['strategy']['leverage']
+        self.require_copy_trading = config['api'].get('copytrading', False)
 
     def get_best_volatile_coin(self):
         """
@@ -88,6 +89,11 @@ class MarketScanner:
                 if info.get('closeOnly') is True:
                     print(f"Skipping {symbol}: closeOnly is True (reduce-only phase)")
                     continue
+                
+                # Filter: Copy Trading Check
+                if self.require_copy_trading:
+                    if info.get('copyTrading', 'none') == 'none':
+                        continue
             # ---------------------------------------
             
             # Filter 2: Check if innovation zone (Expanded)
