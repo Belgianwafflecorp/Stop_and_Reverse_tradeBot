@@ -76,6 +76,13 @@ class MarketScanner:
                 if status != 'trading':
                     print(f"Skipping {symbol}: Status is {info['status']}")
                     continue
+            
+            # Check for delivery time (indicates delisting for perpetuals)
+            if info:
+                d_time = str(info.get('deliveryTime') or '0')
+                if d_time != '0':
+                    print(f"Skipping {symbol}: deliveryTime is set (likely delisting): {d_time}")
+                    continue
 
             # 3. Bybit reduce-only/close-only phase filter
             # If openAllowed is False, or reduceOnly/closeOnly is True, skip
