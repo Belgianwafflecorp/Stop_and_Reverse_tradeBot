@@ -89,11 +89,14 @@ class MarketScanner:
                 if info.get('closeOnly') is True:
                     print(f"Skipping {symbol}: closeOnly is True (reduce-only phase)")
                     continue
-                
-                # Filter: Copy Trading Check
-                if self.require_copy_trading:
-                    if info.get('copyTrading', 'none') == 'none':
-                        continue
+            
+            # Filter: Copy Trading Check
+            if self.require_copy_trading:
+                # If info is missing or copyTrading is 'none', skip
+                # Ensure we handle None/Empty values correctly
+                ct_val = info.get('copyTrading') if info else None
+                if not ct_val or str(ct_val).lower() == 'none':
+                    continue
             # ---------------------------------------
             
             # Filter 2: Check if innovation zone (Expanded)
